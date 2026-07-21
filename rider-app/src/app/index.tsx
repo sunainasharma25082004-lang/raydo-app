@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image } from 'rea
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { ChevronRight, Route } from 'lucide-react-native';
-import Animated, { useSharedValue, useAnimatedStyle, withTiming, interpolate, Extrapolation, useAnimatedScrollHandler } from 'react-native-reanimated';
+import Animated, { useSharedValue, useAnimatedStyle, interpolate, Extrapolation, useAnimatedScrollHandler, type SharedValue } from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
 
 const { width, height } = Dimensions.get('window');
@@ -28,6 +28,32 @@ const SLIDES = [
     image: 'https://images.unsplash.com/photo-1494587416117-f102a2ac0a8d?auto=format&fit=crop&q=80',
   }
 ];
+
+function PaginationDot({
+  index,
+  scrollX,
+}: {
+  index: number;
+  scrollX: SharedValue<number>;
+}) {
+  const animatedDotStyle = useAnimatedStyle(() => {
+    const opacity = interpolate(
+      scrollX.value,
+      [(index - 1) * width, index * width, (index + 1) * width],
+      [0.3, 1, 0.3],
+      Extrapolation.CLAMP
+    );
+    const widthAnim = interpolate(
+      scrollX.value,
+      [(index - 1) * width, index * width, (index + 1) * width],
+      [8, 20, 8],
+      Extrapolation.CLAMP
+    );
+    return { opacity, width: widthAnim };
+  });
+
+  return <Animated.View style={[styles.dot, animatedDotStyle]} />;
+}
 
 export default function OnboardingScreen() {
   const router = useRouter();
@@ -98,24 +124,9 @@ export default function OnboardingScreen() {
       {/* Footer controls */}
       <View style={styles.footer}>
         <View style={styles.pagination}>
-          {SLIDES.map((_, index) => {
-            const animatedDotStyle = useAnimatedStyle(() => {
-              const opacity = interpolate(
-                scrollX.value,
-                [(index - 1) * width, index * width, (index + 1) * width],
-                [0.3, 1, 0.3],
-                Extrapolation.CLAMP
-              );
-              const widthAnim = interpolate(
-                scrollX.value,
-                [(index - 1) * width, index * width, (index + 1) * width],
-                [8, 20, 8],
-                Extrapolation.CLAMP
-              );
-              return { opacity, width: widthAnim };
-            });
-            return <Animated.View key={index} style={[styles.dot, animatedDotStyle]} />;
-          })}
+          {SLIDES.map((_, index) => (
+            <PaginationDot key={index} index={index} scrollX={scrollX} />
+          ))}
         </View>
 
         <TouchableOpacity 

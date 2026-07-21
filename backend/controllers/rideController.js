@@ -18,8 +18,8 @@ exports.requestRide = async (req, res) => {
       status: 'Requested'
     });
 
-    // In a real app, you would use GeoQueries to find nearby drivers 
-    // and emit a socket event to them. We will handle that in the socket logic.
+    // Broadcast to all drivers (in a real app, use GeoQueries to find nearby drivers)
+    req.app.get('io').emit('new_ride_request', { ride });
 
     res.status(201).json({ message: 'Ride requested successfully', ride });
   } catch (error) {
@@ -42,10 +42,13 @@ exports.acceptRide = async (req, res) => {
     ride.status = 'Accepted';
     await ride.save();
 
-    // Emit socket event to the rider that driver accepted
-    req.app.get('io').to(ride.riderId.toString()).emit('ride_accepted', { ride });
+    // Populate rider and driver details to include phone numbers for calling
+    const populatedRide = await Ride.findById(rideId).populate('riderId').populate('driverId');
 
-    res.status(200).json({ message: 'Ride accepted', ride });
+    // Emit socket event to the rider that driver accepted
+    req.app.get('io').to(populatedRide.riderId._id.toString()).emit('ride_accepted', { ride: populatedRide });
+
+    res.status(200).json({ message: 'Ride accepted', ride: populatedRide });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Error accepting ride' });

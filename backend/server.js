@@ -17,6 +17,7 @@ const io = new Server(server, {
     methods: ['GET', 'POST', 'PUT', 'DELETE']
   }
 });
+app.set('io', io);
 
 // Middleware
 app.use(cors());
@@ -40,6 +41,7 @@ app.use('/api/rides', require('./routes/rides'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/drivers', require('./routes/drivers'));
 app.use('/api/payments', require('./routes/payments'));
+app.use('/api/map', require('./routes/map'));
 
 // Basic route for testing
 app.get('/', (req, res) => {

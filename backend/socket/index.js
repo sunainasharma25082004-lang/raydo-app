@@ -44,6 +44,18 @@ module.exports = (io) => {
       io.to(riderId).emit('live_tracking_update', { lat, lng });
     });
 
+    // Chat messaging between Rider and Driver
+    socket.on('send_chat_message', (data) => {
+      const { receiverId, message, senderId, senderRole } = data;
+      // Send to the specific user's room
+      io.to(receiverId).emit('receive_chat_message', { 
+        message, 
+        senderId, 
+        senderRole,
+        timestamp: new Date()
+      });
+    });
+
     socket.on('disconnect', () => {
       console.log(`Socket disconnected: ${socket.id}`);
     });

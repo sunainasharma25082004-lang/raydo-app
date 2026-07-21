@@ -1,0 +1,126 @@
+
+//Routing Api 
+
+var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v1/routing?waypoints=50.96209827745463%2C4.414458883409225%7C50.429137079078345%2C5.00088081232559&mode=drive&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+
+
+//geocoding api
+
+var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v1/geocode/search?text=38%20Upper%20Montagu%20Street%2C%20Westminster%20W1H%201LJ%2C%20United%20Kingdom&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+
+ // PLACES API
+
+ var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v2/places?categories=commercial.supermarket&filter=rect%3A10.716463143326969%2C48.755151258420966%2C10.835314015356737%2C48.680903341613316&limit=20&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+
+
+  //PLACES DETAILS API
+  var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v2/place-details?id=id%3D514d368a517c511e40594bfd7b574ec84740f00103f90135335d1c00000000920313416e61746f6d697363686573204d757365756d&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+  //REVERSE GEOCODING API'S
+
+  var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v1/geocode/reverse?lat=51.21709661403662&lon=6.7782883744862374&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+
+  //AUTO COMPLETE API 
+  var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v1/geocode/autocomplete?text=Mosco&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+  //PLACES API
+
+  var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v2/places?categories=commercial.supermarket&filter=rect%3A10.716463143326969%2C48.755151258420966%2C10.835314015356737%2C48.680903341613316&limit=20&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+ //ISOLINE API 
+
+  var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v1/isoline?lat=39.10052013895695&lon=-76.78959305536686&type=time&mode=drive&range=900&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error)); 
+
+
+
+
+  //ROUTE MATRIX API 
+  var myHeaders = new Headers();
+myHeaders.append("Content-Type", "application/json");
+
+var raw = JSON.stringify({"mode":"drive","sources":[{"location":[8.73784862216246,48.543061473317266]},{"location":[9.305536080205002,48.56743450655594]},{"location":[9.182792846033067,48.09414029055267]}],"targets":[{"location":[8.73784862216246,48.543061473317266]},{"location":[9.305536080205002,48.56743450655594]},{"location":[9.182792846033067,48.09414029055267]}]});
+
+var requestOptions = {
+  method: 'POST',
+  headers: myHeaders,
+  body: raw
+};
+
+fetch("https://api.geoapify.com/v1/routematrix?apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
+
+
+
+
+  //IP GEOLOCATION API 
+
+  var requestOptions = {
+  method: 'GET',
+};
+
+fetch("https://api.geoapify.com/v1/ipinfo?&apiKey=699ca201857c4a64b0ea0eaf65b98e45", requestOptions)
+  .then(response => response.json())
+  .then(result => console.log(result))
+  .catch(error => console.log('error', error));
