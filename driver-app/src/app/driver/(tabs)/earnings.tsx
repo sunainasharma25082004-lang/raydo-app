@@ -1,135 +1,207 @@
-import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { TrendingUp, Wallet } from 'lucide-react-native';
+import React, { useCallback, useState } from 'react';
+import {
+  Alert,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+  ActivityIndicator,
+  RefreshControl,
+} from 'react-native';
+import { useFocusEffect } from 'expo-router';
+import { TrendingUp, Wallet, Banknote } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Card } from '@/components/ui/Card';
-import { useDriver } from '@/context/DriverContext';
-import { WEEKLY_EARNINGS, formatInr } from '@/data/mock';
+import { Button } from '@/components/ui/Button';
+import { useSession } from '@/context/SessionContext';
+import { api } from '@/lib/api';
+import { formatInr } from '@/data/mock';
 import { Colors, Radius } from '@/constants/Colors';
 
 export default function EarningsScreen() {
-  const { todayEarnings, todayTrips, history } = useDriver();
+  const { token } = useSession();
+  const [loading, setLoading] = useState(true);
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [lifetime, setLifetime] = useState(0);
+  const [trips, setTrips] = useState(0);
+  const [open, setOpen] = useState(false);
+  const [note, setNote] = useState('');
+  const [withdrawals, setWithdrawals] = useState<any[]>([]);
+  const [amount, setAmount] = useState('');
+  const [upi, setUpi] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const weekTotal = useMemo(
-    () => WEEKLY_EARNINGS.reduce((s, d) => s + d.amount, 0) + todayEarnings,
-    [todayEarnings]
+  const load = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const w = await api.wallet(token);
+      setWalletBalance(w.walletBalance);
+      setLifetime(w.lifetimeEarnings);
+      setTrips(w.completedTrips || w.totalRides || 0);
+      setOpen(w.weeklyWithdrawOpen);
+      setNote(w.weeklyWithdrawNote);
+      setWithdrawals(w.withdrawals || []);
+    } catch (e: any) {
+      Alert.alert('Wallet', e.message || 'Could not load wallet — is backend running?');
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      load();
+    }, [load]),
   );
 
-  const maxBar = Math.max(...WEEKLY_EARNINGS.map((d) => d.amount), 1);
-  const avgTrip =
-    history.length > 0
-      ? Math.round(history.reduce((s, h) => s + h.fare, 0) / history.length)
-      : 0;
+  const onWithdraw = async () => {
+    if (!token) {
+      Alert.alert('Login required', 'Login with admin-issued Driver ID first.');
+      return;
+    }
+    if (!open) {
+      Alert.alert('Withdrawals closed', note || 'Admin has not opened weekly withdrawals yet.');
+      return;
+    }
+    const amt = Number(amount);
+    if (!amt || amt < 100) {
+      Alert.alert('Amount', 'Minimum withdrawal is ₹100');
+      return;
+    }
+    if (!upi.trim()) {
+      Alert.alert('UPI', 'Enter your UPI ID');
+      return;
+    }
+    setSubmitting(true);
+    try {
+      const res = await api.withdraw(token, amt, upi.trim());
+      Alert.alert('Submitted', res.message);
+      setAmount('');
+      await load();
+    } catch (e: any) {
+      Alert.alert('Withdraw failed', e.message);
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
-    <Screen scroll contentStyle={styles.content}>
+    <Screen
+      scroll
+      contentStyle={styles.content}
+      // @ts-expect-error refresh via child
+    >
       <Text style={styles.title}>Earnings</Text>
-      <Text style={styles.sub}>Track daily performance and weekly trends</Text>
+      <Text style={styles.sub}>Real wallet · weekly withdraw needs admin permission</Text>
+
+      {loading ? <ActivityIndicator color={Colors.primary} /> : null}
 
       <Card style={styles.heroCard}>
         <View style={styles.heroTop}>
           <View style={styles.iconBubble}>
             <Wallet size={20} color={Colors.primary} />
           </View>
-          <View style={styles.badge}>
-            <TrendingUp size={12} color={Colors.success} />
-            <Text style={styles.badgeText}>+12% this week</Text>
+          <View style={[styles.badge, open ? styles.badgeOk : styles.badgeOff]}>
+            <TrendingUp size={12} color={open ? Colors.success : Colors.warning} />
+            <Text style={[styles.badgeText, { color: open ? Colors.success : Colors.warning }]}>
+              {open ? 'Withdraw open' : 'Withdraw closed'}
+            </Text>
           </View>
         </View>
-        <Text style={styles.heroLabel}>This week</Text>
-        <Text style={styles.heroValue}>{formatInr(weekTotal)}</Text>
-        <Text style={styles.heroHint}>Includes today&apos;s live demo earnings</Text>
+        <Text style={styles.heroLabel}>Available balance</Text>
+        <Text style={styles.heroValue}>{formatInr(walletBalance)}</Text>
+        <Text style={styles.heroHint}>{note}</Text>
       </Card>
 
       <View style={styles.row}>
         <Card style={styles.mini}>
-          <Text style={styles.miniLabel}>Today</Text>
-          <Text style={styles.miniValue}>{formatInr(todayEarnings)}</Text>
-          <Text style={styles.miniMeta}>{todayTrips} trips</Text>
+          <Text style={styles.miniLabel}>Lifetime</Text>
+          <Text style={styles.miniValue}>{formatInr(lifetime)}</Text>
         </Card>
         <Card style={styles.mini}>
-          <Text style={styles.miniLabel}>Avg / trip</Text>
-          <Text style={styles.miniValue}>{formatInr(avgTrip)}</Text>
-          <Text style={styles.miniMeta}>{history.length} logged</Text>
+          <Text style={styles.miniLabel}>Completed</Text>
+          <Text style={styles.miniValue}>{trips}</Text>
+          <Text style={styles.miniMeta}>real trips</Text>
         </Card>
       </View>
 
-      <Card>
-        <Text style={styles.sectionTitle}>Weekly chart</Text>
-        <View style={styles.chart}>
-          {WEEKLY_EARNINGS.map((d) => (
-            <View key={d.day} style={styles.barCol}>
-              <Text style={styles.barValue}>{Math.round(d.amount / 100) / 10}k</Text>
-              <View style={styles.barTrack}>
-                <View
-                  style={[
-                    styles.barFill,
-                    { height: `${Math.max((d.amount / maxBar) * 100, 8)}%` },
-                  ]}
-                />
-              </View>
-              <Text style={styles.barDay}>{d.day}</Text>
-            </View>
-          ))}
-        </View>
+      <Card style={{ gap: 10 }}>
+        <Text style={styles.sectionTitle}>Request weekly withdrawal</Text>
+        <Text style={styles.help}>
+          Admin opens withdrawals weekly. Your request stays pending until admin approves payment.
+        </Text>
+        <TextInput
+          style={styles.input}
+          placeholder="Amount (₹)"
+          keyboardType="numeric"
+          value={amount}
+          onChangeText={setAmount}
+          placeholderTextColor={Colors.textLight}
+        />
+        <TextInput
+          style={styles.input}
+          placeholder="UPI ID (name@upi)"
+          autoCapitalize="none"
+          value={upi}
+          onChangeText={setUpi}
+          placeholderTextColor={Colors.textLight}
+        />
+        <Button
+          title="Submit for admin approval"
+          fullWidth
+          loading={submitting}
+          leftIcon={<Banknote size={16} color={Colors.white} />}
+          onPress={onWithdraw}
+          disabled={!open}
+        />
+        <Button title="Refresh wallet" variant="outline" fullWidth onPress={load} />
       </Card>
 
       <Card>
-        <Text style={styles.sectionTitle}>Payout summary</Text>
-        <View style={styles.line}>
-          <Text style={styles.lineLabel}>Gross earnings</Text>
-          <Text style={styles.lineValue}>{formatInr(weekTotal)}</Text>
-        </View>
-        <View style={styles.line}>
-          <Text style={styles.lineLabel}>Platform fee (demo)</Text>
-          <Text style={[styles.lineValue, { color: Colors.error }]}>
-            -{formatInr(Math.round(weekTotal * 0.12))}
-          </Text>
-        </View>
-        <View style={[styles.line, styles.lineLast]}>
-          <Text style={styles.lineLabelBold}>Net payout</Text>
-          <Text style={styles.lineValueBold}>
-            {formatInr(Math.round(weekTotal * 0.88))}
-          </Text>
-        </View>
+        <Text style={styles.sectionTitle}>Withdrawal history</Text>
+        {withdrawals.length === 0 ? (
+          <Text style={styles.help}>No withdrawal requests yet.</Text>
+        ) : (
+          withdrawals.map((w) => (
+            <View key={w.id} style={styles.wRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.wAmt}>{formatInr(w.amount)}</Text>
+                <Text style={styles.help}>{w.upiId}</Text>
+                <Text style={styles.help}>{new Date(w.createdAt).toLocaleString()}</Text>
+              </View>
+              <Text
+                style={[
+                  styles.wStatus,
+                  w.status === 'paid' && { color: Colors.success },
+                  w.status === 'rejected' && { color: Colors.error },
+                  w.status === 'pending_admin' && { color: Colors.warning },
+                ]}
+              >
+                {w.status}
+              </Text>
+            </View>
+          ))
+        )}
       </Card>
     </Screen>
   );
 }
 
 const styles = StyleSheet.create({
-  content: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    gap: 14,
-    paddingBottom: 24,
-  },
-  title: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: Colors.text,
-  },
-  sub: {
-    fontSize: 14,
-    color: Colors.textSecondary,
-    marginTop: -6,
-    marginBottom: 4,
-  },
-  heroCard: {
-    backgroundColor: Colors.primary,
-    borderColor: Colors.primary,
-  },
-  heroTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
+  content: { paddingHorizontal: 20, gap: 14, paddingBottom: 32, paddingTop: 8 },
+  title: { fontSize: 28, fontWeight: '800', color: Colors.text },
+  sub: { fontSize: 13, color: Colors.textLight, fontWeight: '600', marginTop: -6 },
+  heroCard: { gap: 6 },
+  heroTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   iconBubble: {
     width: 40,
     height: 40,
-    borderRadius: 12,
-    backgroundColor: Colors.accent,
+    borderRadius: 14,
+    backgroundColor: Colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -137,126 +209,41 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: 'rgba(255,255,255,0.12)',
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 5,
     borderRadius: Radius.full,
   },
-  badgeText: {
-    color: Colors.white,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  heroLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  heroValue: {
-    color: Colors.white,
-    fontSize: 36,
-    fontWeight: '800',
-    marginTop: 4,
-  },
-  heroHint: {
-    color: 'rgba(255,255,255,0.55)',
-    fontSize: 12,
-    marginTop: 6,
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 12,
-  },
+  badgeOk: { backgroundColor: Colors.successSoft },
+  badgeOff: { backgroundColor: Colors.warningSoft },
+  badgeText: { fontSize: 11, fontWeight: '800' },
+  heroLabel: { fontSize: 13, color: Colors.textLight, fontWeight: '600' },
+  heroValue: { fontSize: 32, fontWeight: '800', color: Colors.primary },
+  heroHint: { fontSize: 12, color: Colors.textSecondary, fontWeight: '600' },
+  row: { flexDirection: 'row', gap: 10 },
   mini: { flex: 1 },
-  miniLabel: {
-    fontSize: 12,
-    color: Colors.textLight,
-    fontWeight: '700',
-  },
-  miniValue: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: Colors.text,
-    marginTop: 6,
-  },
-  miniMeta: {
-    fontSize: 12,
-    color: Colors.textSecondary,
-    marginTop: 4,
-  },
-  sectionTitle: {
+  miniLabel: { fontSize: 12, color: Colors.textLight, fontWeight: '600' },
+  miniValue: { fontSize: 20, fontWeight: '800', color: Colors.text, marginTop: 4 },
+  miniMeta: { fontSize: 11, color: Colors.textLight, marginTop: 2 },
+  sectionTitle: { fontSize: 15, fontWeight: '800', color: Colors.text },
+  help: { fontSize: 12, color: Colors.textLight, fontWeight: '500', lineHeight: 17 },
+  input: {
+    borderWidth: 1,
+    borderColor: Colors.border,
+    borderRadius: Radius.md,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     fontSize: 15,
-    fontWeight: '800',
-    color: Colors.text,
-    marginBottom: 14,
-  },
-  chart: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    height: 160,
-    gap: 6,
-  },
-  barCol: {
-    flex: 1,
-    alignItems: 'center',
-    height: '100%',
-    justifyContent: 'flex-end',
-    gap: 6,
-  },
-  barValue: {
-    fontSize: 9,
-    color: Colors.textLight,
     fontWeight: '600',
+    color: Colors.text,
+    backgroundColor: Colors.surface,
   },
-  barTrack: {
-    width: '70%',
-    flex: 1,
-    backgroundColor: Colors.surfaceMuted,
-    borderRadius: 8,
-    justifyContent: 'flex-end',
-    overflow: 'hidden',
-  },
-  barFill: {
-    width: '100%',
-    backgroundColor: Colors.accent,
-    borderRadius: 8,
-    minHeight: 8,
-  },
-  barDay: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textSecondary,
-  },
-  line: {
+  wRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    alignItems: 'center',
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderTopWidth: 1,
+    borderTopColor: Colors.border,
   },
-  lineLast: {
-    borderBottomWidth: 0,
-    paddingBottom: 0,
-    paddingTop: 12,
-  },
-  lineLabel: {
-    color: Colors.textSecondary,
-    fontSize: 14,
-  },
-  lineValue: {
-    color: Colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  lineLabelBold: {
-    color: Colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  lineValueBold: {
-    color: Colors.primary,
-    fontSize: 16,
-    fontWeight: '800',
-  },
+  wAmt: { fontSize: 16, fontWeight: '800', color: Colors.text },
+  wStatus: { fontSize: 12, fontWeight: '800', textTransform: 'uppercase' },
 });

@@ -1,10 +1,12 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Href, useRouter } from 'expo-router';
 import {
   BadgeCheck,
   ChevronRight,
+  FileText,
   HelpCircle,
+  Info,
   LogOut,
   Settings,
   Shield,
@@ -15,18 +17,22 @@ import { Screen } from '@/components/ui/Screen';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useDriver } from '@/context/DriverContext';
+import { useSession } from '@/context/SessionContext';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 
-const MENU = [
-  { icon: Car, label: 'Vehicle details', value: 'KA 01 AB 4521' },
-  { icon: Shield, label: 'Documents', value: 'Verified' },
-  { icon: Settings, label: 'Preferences', value: '' },
-  { icon: HelpCircle, label: 'Help & support', value: '' },
+const MENU: { icon: typeof Car; label: string; value: string; href: Href }[] = [
+  { icon: Car, label: 'Vehicle details', value: '', href: '/driver/vehicle' as Href },
+  { icon: Shield, label: 'Documents / KYC', value: 'Verified', href: '/driver/documents' as Href },
+  { icon: Settings, label: 'Preferences', value: '', href: '/driver/preferences' as Href },
+  { icon: HelpCircle, label: 'Help & support', value: '', href: '/driver/help-support' as Href },
+  { icon: Info, label: 'About Us', value: '', href: '/driver/about' as Href },
+  { icon: FileText, label: 'Privacy Policy', value: '', href: '/driver/privacy' as Href },
 ];
 
 export default function ProfileScreen() {
   const router = useRouter();
   const { driver, todayTrips, todayEarnings } = useDriver();
+  const { clearSession, driver: sessionDriver } = useSession();
 
   return (
     <Screen scroll contentStyle={styles.content}>
@@ -48,6 +54,12 @@ export default function ProfileScreen() {
             <BadgeCheck size={18} color={Colors.success} />
           </View>
           <Text style={styles.phone}>{driver.phone}</Text>
+          {driver.loginId ? (
+            <Text style={styles.phone}>ID: {driver.loginId}</Text>
+          ) : null}
+          <Text style={styles.phone}>
+            {driver.vehicleCategory} · KYC {sessionDriver?.kycStatus || 'approved'}
+          </Text>
           <View style={styles.metaRow}>
             <View style={styles.metaChip}>
               <Star size={12} color={Colors.accent} fill={Colors.accent} />
@@ -81,17 +93,24 @@ export default function ProfileScreen() {
       <Card padded={false}>
         {MENU.map((item, idx) => {
           const Icon = item.icon;
+          const value =
+            item.label === 'Vehicle details'
+              ? driver.vehicle
+              : item.label.startsWith('Documents')
+                ? driver.vehicleCategory
+                : item.value;
           return (
             <Pressable
               key={item.label}
               style={[styles.menuRow, idx < MENU.length - 1 && styles.menuBorder]}
+              onPress={() => router.push(item.href)}
             >
               <View style={styles.menuIcon}>
                 <Icon size={18} color={Colors.primary} />
               </View>
               <View style={styles.menuTextWrap}>
                 <Text style={styles.menuLabel}>{item.label}</Text>
-                {item.value ? <Text style={styles.menuValue}>{item.value}</Text> : null}
+                {value ? <Text style={styles.menuValue}>{value}</Text> : null}
               </View>
               <ChevronRight size={18} color={Colors.textLight} />
             </Pressable>
@@ -102,12 +121,24 @@ export default function ProfileScreen() {
       <Button
         title="Sign out"
         variant="outline"
-        onPress={() => router.replace('/driver/login')}
+        onPress={() =>
+          Alert.alert('Sign out?', 'You will need admin credentials to log in again.', [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Sign out',
+              style: 'destructive',
+              onPress: () => {
+                clearSession();
+                router.replace('/driver/login');
+              },
+            },
+          ])
+        }
         leftIcon={<LogOut size={16} color={Colors.primary} />}
         fullWidth
       />
 
-      <Text style={styles.version}>Raydo Driver · v1.0.0 · Demo mode</Text>
+      <Text style={styles.version}>Raydo Driver · v1.0.0</Text>
     </Screen>
   );
 }

@@ -16,7 +16,7 @@ export default function PaymentScreen() {
     setTimeout(() => {
       setPaymentState('done');
       setTimeout(() => {
-        router.replace('/rider/home');
+        router.replace('/(tabs)/home');
       }, 1000);
     }, 1500);
   };

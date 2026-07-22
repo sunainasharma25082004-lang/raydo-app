@@ -27,7 +27,7 @@ const rideSchema = new mongoose.Schema({
   },
   vehicleType: {
     type: String,
-    enum: ['Bike', 'Auto', 'E-Rickshaw'],
+    enum: ['Bike', 'Scooty', 'Auto', 'Car', 'E-Rickshaw'],
     required: true
   },
   distance: Number, // in km

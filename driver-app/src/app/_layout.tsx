@@ -3,24 +3,27 @@ import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet } from 'react-native';
 import { DriverProvider } from '@/context/DriverContext';
+import { SessionProvider } from '@/context/SessionContext';
 import { Colors } from '@/constants/Colors';
 
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
-      <DriverProvider>
-        <StatusBar style="dark" />
-        <Stack
-          screenOptions={{
-            headerShown: false,
-            contentStyle: { backgroundColor: Colors.background },
-            animation: 'fade',
-          }}
-        >
-          <Stack.Screen name="index" />
-          <Stack.Screen name="driver" />
-        </Stack>
-      </DriverProvider>
+      <SessionProvider>
+        <DriverProvider>
+          <StatusBar style="dark" />
+          <Stack
+            screenOptions={{
+              headerShown: false,
+              contentStyle: { backgroundColor: Colors.background },
+              animation: 'fade',
+            }}
+          >
+            <Stack.Screen name="index" />
+            <Stack.Screen name="driver" />
+          </Stack>
+        </DriverProvider>
+      </SessionProvider>
     </GestureHandlerRootView>
   );
 }

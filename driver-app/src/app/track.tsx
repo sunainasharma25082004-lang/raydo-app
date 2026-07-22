@@ -40,15 +40,43 @@ export default function DriverTrackScreen() {
   }, [locationSubscription]);
 
   const startTracking = async () => {
+    const services = await Location.hasServicesEnabledAsync();
+    if (!services) {
+      Alert.alert('Location off', 'Turn on GPS so your live location can be shared.');
+      return;
+    }
     let { status } = await Location.requestForegroundPermissionsAsync();
-    if (status !== 'granted') return;
+    if (status !== 'granted') {
+      Alert.alert(
+        'Permission needed',
+        'Allow location so your actual GPS can be shared with the rider.',
+        [
+          { text: 'Open settings', onPress: () => Linking.openSettings() },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
+      return;
+    }
 
     setIsTracking(true);
-    const sub = await Location.watchPositionAsync({ accuracy: Location.Accuracy.High, timeInterval: 5000, distanceInterval: 10 },
+    const sub = await Location.watchPositionAsync(
+      {
+        accuracy: Location.Accuracy.High,
+        timeInterval: 4000,
+        distanceInterval: 8,
+        mayShowUserSettingsDialog: true,
+      },
       (newLoc) => {
         setLocation(newLoc);
-        if (socket) socket.emit('trip_location_update', { rideId: 'ride123', riderId: RIDER_ID, lat: newLoc.coords.latitude, lng: newLoc.coords.longitude });
-      }
+        if (socket) {
+          socket.emit('trip_location_update', {
+            rideId: 'ride123',
+            riderId: RIDER_ID,
+            lat: newLoc.coords.latitude,
+            lng: newLoc.coords.longitude,
+          });
+        }
+      },
     );
     setLocationSubscription(sub);
   };

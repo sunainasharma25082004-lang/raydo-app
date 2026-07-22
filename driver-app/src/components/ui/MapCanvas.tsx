@@ -8,6 +8,8 @@ type Props = {
   subtitle?: string;
   showRoute?: boolean;
   compact?: boolean;
+  coords?: { latitude: number; longitude: number } | null;
+  loading?: boolean;
 };
 
 export function MapCanvas({
@@ -15,7 +17,15 @@ export function MapCanvas({
   subtitle = 'Live map preview',
   showRoute,
   compact,
+  coords,
+  loading,
 }: Props) {
+  const gpsLine = coords
+    ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`
+    : loading
+      ? 'Reading GPS…'
+      : 'Waiting for GPS';
+
   return (
     <View style={[styles.wrap, compact && styles.compact]}>
       <View style={styles.grid} />
@@ -38,7 +48,10 @@ export function MapCanvas({
 
       <View style={styles.badge}>
         <Text style={styles.badgeTitle}>{label}</Text>
-        <Text style={styles.badgeSub}>{subtitle}</Text>
+        <Text style={styles.badgeSub} numberOfLines={2}>
+          {subtitle}
+        </Text>
+        <Text style={styles.gps}>{gpsLine}</Text>
       </View>
     </View>
   );
@@ -138,5 +151,11 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textLight,
     marginTop: 2,
+  },
+  gps: {
+    fontSize: 10,
+    color: Colors.primary,
+    marginTop: 4,
+    fontWeight: '700',
   },
 });

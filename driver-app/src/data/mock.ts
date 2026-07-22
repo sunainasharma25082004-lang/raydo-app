@@ -6,6 +6,8 @@ export type TripStatus =
   | 'in_trip'
   | 'completed';
 
+export type VehicleKind = 'Bike' | 'Scooty' | 'Auto' | 'Car' | 'Cab';
+
 export type RideRequest = {
   id: string;
   riderName: string;
@@ -18,7 +20,7 @@ export type RideRequest = {
   etaMin: number;
   fare: number;
   payment: 'Cash' | 'UPI' | 'Card';
-  vehicle: 'Auto' | 'Cab' | 'Bike';
+  vehicle: VehicleKind;
 };
 
 export type HistoryTrip = {
@@ -43,11 +45,25 @@ export const DRIVER = {
   phone: '+91 98765 43210',
   vehicle: 'KA 01 AB 4521',
   vehicleType: 'Auto · Bajaj RE',
+  vehicleCategory: 'Auto' as VehicleKind,
   rating: 4.86,
   trips: 1284,
   years: 3,
   city: 'Bengaluru',
 };
+
+/** Scooty/Bike share two-wheeler group; Auto alone; Car/Cab alone */
+export function vehicleGroup(type?: string | null): 'two_wheeler' | 'auto' | 'car' | 'other' {
+  const t = String(type || '').toLowerCase();
+  if (t === 'bike' || t === 'scooty' || t === 'scooter' || t === 'two-wheeler') return 'two_wheeler';
+  if (t === 'auto' || t === 'auto-rickshaw' || t === 'erickshaw' || t === 'e-rickshaw') return 'auto';
+  if (t === 'car' || t === 'cab' || t === 'sedan' || t === 'suv') return 'car';
+  return 'other';
+}
+
+export function vehiclesMatch(driverType?: string | null, requestType?: string | null) {
+  return vehicleGroup(driverType) === vehicleGroup(requestType);
+}
 
 export const SAMPLE_REQUESTS: RideRequest[] = [
   {
@@ -90,7 +106,35 @@ export const SAMPLE_REQUESTS: RideRequest[] = [
     etaMin: 18,
     fare: 780,
     payment: 'Card',
-    vehicle: 'Cab',
+    vehicle: 'Car',
+  },
+  {
+    id: 'req-4',
+    riderName: 'Vikram T.',
+    riderRating: 4.8,
+    pickup: 'BTM 2nd Stage',
+    pickupArea: '16th Main',
+    drop: 'Jayanagar 4th Block',
+    dropArea: 'South End Circle',
+    distanceKm: 4.1,
+    etaMin: 4,
+    fare: 55,
+    payment: 'UPI',
+    vehicle: 'Scooty',
+  },
+  {
+    id: 'req-5',
+    riderName: 'Sneha R.',
+    riderRating: 4.6,
+    pickup: 'Marathahalli Bridge',
+    pickupArea: 'ORR',
+    drop: 'Bellandur',
+    dropArea: 'Sarjapur Rd',
+    distanceKm: 5.5,
+    etaMin: 6,
+    fare: 62,
+    payment: 'Cash',
+    vehicle: 'Bike',
   },
 ];
 
@@ -128,28 +172,6 @@ export const INITIAL_HISTORY: HistoryTrip[] = [
     rating: 5,
     payment: 'UPI',
   },
-  {
-    id: 'h4',
-    date: 'Yesterday',
-    time: '02:05 PM',
-    pickup: 'Electronic City',
-    drop: 'Bommanahalli',
-    fare: 210,
-    distanceKm: 9.4,
-    rating: 5,
-    payment: 'Card',
-  },
-  {
-    id: 'h5',
-    date: 'Jul 16',
-    time: '11:30 AM',
-    pickup: 'Hebbal Flyover',
-    drop: 'Manyata Tech Park',
-    fare: 142,
-    distanceKm: 5.6,
-    rating: 4,
-    payment: 'UPI',
-  },
 ];
 
 export const WEEKLY_EARNINGS: EarningDay[] = [
@@ -166,8 +188,12 @@ export function formatInr(amount: number) {
   return `₹${amount.toLocaleString('en-IN')}`;
 }
 
-export function pickRandomRequest(): RideRequest {
-  const base = SAMPLE_REQUESTS[Math.floor(Math.random() * SAMPLE_REQUESTS.length)];
+export function pickRandomRequest(driverVehicleType?: string | null): RideRequest | null {
+  const pool = SAMPLE_REQUESTS.filter((r) =>
+    driverVehicleType ? vehiclesMatch(driverVehicleType, r.vehicle) : true,
+  );
+  if (!pool.length) return null;
+  const base = pool[Math.floor(Math.random() * pool.length)];
   return {
     ...base,
     id: `req-${Date.now()}`,

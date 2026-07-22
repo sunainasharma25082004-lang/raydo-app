@@ -1,5 +1,5 @@
-import React, { useEffect } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef } from 'react';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Bell, Sparkles, Star, Zap } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
@@ -10,6 +10,10 @@ import { Button } from '@/components/ui/Button';
 import { useDriver } from '@/context/DriverContext';
 import { formatInr } from '@/data/mock';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
+import { useCurrentLocation } from '@/hooks/use-current-location';
+import { useLiveLocationSync } from '@/hooks/use-live-location-sync';
+import { useSession } from '@/context/SessionContext';
+import { api, LiveRide } from '@/lib/api';
 
 export default function DriverHomeScreen() {
   const router = useRouter();
@@ -22,26 +26,152 @@ export default function DriverHomeScreen() {
     todayTrips,
     simulateIncoming,
   } = useDriver();
+  const { token } = useSession();
+  const { coords, address, loading: locLoading, error: locError, refresh: refreshLocation } =
+    useCurrentLocation({ watch: true, highAccuracy: true });
+  const lastNavStatus = useRef<string | null>(null);
+
+  // Real GPS → backend + rider sockets while online
+  useLiveLocationSync({ enabled: isOnline, isOnline });
 
   useEffect(() => {
+    // Prevent push loops when home re-renders under the request modal
+    if (lastNavStatus.current === tripStatus) return;
+
     if (tripStatus === 'incoming') {
+      lastNavStatus.current = tripStatus;
       router.push('/driver/request');
     } else if (tripStatus === 'to_pickup' || tripStatus === 'waiting' || tripStatus === 'in_trip') {
+      lastNavStatus.current = tripStatus;
       router.push('/driver/trip');
     } else if (tripStatus === 'completed') {
+      lastNavStatus.current = tripStatus;
       router.push('/driver/complete');
+    } else if (tripStatus === 'idle') {
+      lastNavStatus.current = 'idle';
     }
   }, [tripStatus, router]);
 
+  // Auto-check server for real rider requests while online
+  useEffect(() => {
+    if (!isOnline || !token || tripStatus !== 'idle') return;
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const res = await api.openRides(token);
+        if (cancelled || !res.rides?.length) return;
+        const r: LiveRide = res.rides[0];
+        Alert.alert(
+          'Live ride request',
+          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}`,
+          [
+            { text: 'Later', style: 'cancel' },
+            {
+              text: 'Accept & go',
+              onPress: async () => {
+                try {
+                  await api.acceptRide(token, r.id);
+                  // Jump to trip — GPS stream continues for rider map
+                  router.push('/driver/trip');
+                } catch (e: any) {
+                  Alert.alert('Accept failed', e.message);
+                }
+              },
+            },
+          ],
+        );
+      } catch {
+        /* backend offline */
+      }
+    };
+    check();
+    const t = setInterval(check, 8000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [isOnline, token, tripStatus, router]);
+
   const busy = tripStatus !== 'idle' && tripStatus !== 'incoming';
+
+  const goOnline = async (value: boolean) => {
+    setOnline(value);
+    if (token) {
+      try {
+        await api.setOnline(
+          token,
+          value,
+          coords?.latitude,
+          coords?.longitude,
+        );
+      } catch (e: any) {
+        if (value) {
+          Alert.alert(
+            'Online',
+            e.message || 'Could not connect to backend. Check API IP in config.ts.',
+          );
+        }
+      }
+    } else if (value) {
+      Alert.alert(
+        'Login required',
+        'Sign in with your admin-approved Driver ID for live tracking.',
+      );
+    }
+  };
+
+  const fetchOpenRides = async () => {
+    if (!token) {
+      Alert.alert('Login required', 'Sign in with driver credentials for real rides.');
+      simulateIncoming();
+      return;
+    }
+    try {
+      const res = await api.openRides(token);
+      if (res.rides?.length) {
+        const r: LiveRide = res.rides[0];
+        Alert.alert(
+          'Nearby ride',
+          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}`,
+          [
+            { text: 'Ignore', style: 'cancel' },
+            {
+              text: 'Accept',
+              onPress: async () => {
+                try {
+                  await api.acceptRide(token, r.id);
+                  router.push('/driver/trip');
+                } catch (e: any) {
+                  Alert.alert('Accept failed', e.message);
+                }
+              },
+            },
+          ],
+        );
+      } else {
+        Alert.alert(
+          'No open rides',
+          'No matching requests right now. Ask the rider to book first (same vehicle type).',
+        );
+      }
+    } catch (e: any) {
+      Alert.alert('Server', e.message || 'Check that the backend is running.');
+    }
+  };
 
   return (
     <Screen edges={['top']} style={styles.screen}>
       <View style={styles.mapArea}>
         <MapCanvas
           label={isOnline ? 'Broadcasting nearby' : 'Offline mode'}
-          subtitle={isOnline ? 'Waiting for ride requests' : 'Go online to start'}
+          subtitle={
+            locError
+              ? locError
+              : address || (isOnline ? 'Waiting for ride requests' : 'Go online to start')
+          }
           showRoute={false}
+          coords={coords}
+          loading={locLoading}
         />
 
         <View style={styles.topBar}>
@@ -76,7 +206,7 @@ export default function DriverHomeScreen() {
       <View style={styles.sheet}>
         <View style={styles.handle} />
 
-        <OnlineToggle online={isOnline} onChange={setOnline} disabled={busy} />
+        <OnlineToggle online={isOnline} onChange={goOnline} disabled={busy} />
 
         <View style={styles.stats}>
           <StatPill
@@ -99,15 +229,30 @@ export default function DriverHomeScreen() {
             {isOnline ? 'You are live' : 'Quick start'}
           </Text>
           <Text style={styles.tipBody}>
-            {isOnline
-              ? 'Stay near high-demand areas. A demo request will arrive shortly, or trigger one now.'
-              : 'Toggle online to receive ride requests. No backend needed — this is a full frontend demo flow.'}
+            {coords
+              ? `Live GPS active${coords.accuracy != null ? ` (±${Math.round(coords.accuracy)}m)` : ''}. ${
+                  isOnline
+                    ? 'You are visible for nearby matching.'
+                    : 'Go online to receive requests near this point.'
+                }`
+              : locLoading
+                ? 'Requesting location permission and GPS fix…'
+                : 'Location not available yet. Tap below to allow GPS access.'}
           </Text>
+          {!coords ? (
+            <Button
+              title="Enable location access"
+              variant="accent"
+              onPress={refreshLocation}
+              style={{ marginTop: 12 }}
+              fullWidth
+            />
+          ) : null}
           {isOnline && tripStatus === 'idle' ? (
             <Button
-              title="Simulate ride request"
+              title="Check live ride requests"
               variant="accent"
-              onPress={simulateIncoming}
+              onPress={fetchOpenRides}
               style={{ marginTop: 12 }}
               fullWidth
             />

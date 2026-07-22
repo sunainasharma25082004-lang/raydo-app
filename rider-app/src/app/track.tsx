@@ -26,29 +26,66 @@ export default function TrackScreen() {
   const DRIVER_ID = 'driver123'; // In real app, this comes from ride details
 
   useEffect(() => {
-    (async () => {
-      let { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted') return;
+    let active = true;
+    let newSocket: Socket | null = null;
 
-      let currentLocation = await Location.getCurrentPositionAsync({});
+    (async () => {
+      const services = await Location.hasServicesEnabledAsync();
+      if (!services) {
+        Alert.alert('Location off', 'Turn on GPS / Location services for live tracking.', [
+          { text: 'Open settings', onPress: () => Linking.openSettings() },
+          { text: 'OK' },
+        ]);
+        return;
+      }
+
+      let { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert(
+          'Permission needed',
+          'Allow location access so we can show your actual position on the map.',
+          [
+            { text: 'Open settings', onPress: () => Linking.openSettings() },
+            { text: 'Cancel', style: 'cancel' },
+          ],
+        );
+        return;
+      }
+
+      const currentLocation = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.High,
+        mayShowUserSettingsDialog: true,
+      });
+      if (!active) return;
       setLocation(currentLocation);
 
-      const newSocket = io(API_URL);
+      newSocket = io(API_URL);
       setSocket(newSocket);
 
       newSocket.emit('join_rider', RIDER_ID);
 
-      newSocket.on('live_tracking_update', (data: { lat: number, lng: number }) => {
+      newSocket.on('live_tracking_update', (data: { lat: number; lng: number }) => {
         setDriverLocation(data);
-        fetchEtaAndRoute(currentLocation.coords.latitude, currentLocation.coords.longitude, data.lat, data.lng);
+        fetchEtaAndRoute(
+          currentLocation.coords.latitude,
+          currentLocation.coords.longitude,
+          data.lat,
+          data.lng,
+        );
       });
 
       newSocket.on('receive_chat_message', (data) => {
-        setMessages(prev => [...prev, { id: Math.random().toString(), text: data.message, sender: data.senderRole }]);
+        setMessages((prev) => [
+          ...prev,
+          { id: Math.random().toString(), text: data.message, sender: data.senderRole },
+        ]);
       });
-
-      return () => newSocket.disconnect();
     })();
+
+    return () => {
+      active = false;
+      newSocket?.disconnect();
+    };
   }, []);
 
   const fetchEtaAndRoute = async (rLat: number, rLng: number, dLat: number, dLng: number) => {

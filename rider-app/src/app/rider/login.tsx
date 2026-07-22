@@ -1,171 +1,286 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TextInput, TouchableOpacity, KeyboardAvoidingView, Platform } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  TouchableOpacity,
+  KeyboardAvoidingView,
+  Platform,
+  StatusBar,
+} from 'react-native';
 import { useRouter } from 'expo-router';
-import { Colors } from '@/constants/Colors';
-import { ArrowRight, Phone, ShieldCheck } from 'lucide-react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors, Radius, Shadow } from '@/constants/Colors';
+import { ArrowRight, Phone, ShieldCheck, Sparkles } from 'lucide-react-native';
 
 export default function LoginScreen() {
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'PHONE' | 'OTP'>('PHONE');
 
+  const canContinue =
+    step === 'PHONE' ? phone.replace(/\D/g, '').length === 10 : otp.length === 4;
+
   const handleNext = () => {
-    if (step === 'PHONE' && phone.length >= 10) {
+    if (step === 'PHONE' && canContinue) {
       setStep('OTP');
-    } else if (step === 'OTP' && otp.length === 4) {
-      // Mock login success
+    } else if (step === 'OTP' && canContinue) {
       router.replace('/(tabs)/home');
     }
   };
 
   return (
-    <KeyboardAvoidingView 
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-    >
-      <View style={styles.content}>
-        <Text style={styles.title}>
-          {step === 'PHONE' ? 'Enter your mobile number' : 'Verify your number'}
-        </Text>
-        <Text style={styles.subtitle}>
-          {step === 'PHONE' 
-            ? 'We will send you an OTP to verify your account.' 
-            : `We've sent a 4-digit code to +91 ${phone}`}
-        </Text>
-
-        <View style={styles.inputContainer}>
-          {step === 'PHONE' ? (
-            <>
-              <Phone color={Colors.textLight} size={20} style={styles.icon} />
-              <Text style={styles.prefix}>+91</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="00000 00000"
-                placeholderTextColor={Colors.textLight}
-                keyboardType="phone-pad"
-                value={phone}
-                onChangeText={setPhone}
-                maxLength={10}
-                autoFocus
-              />
-            </>
-          ) : (
-            <>
-              <ShieldCheck color={Colors.textLight} size={20} style={styles.icon} />
-              <TextInput
-                style={[styles.input, { letterSpacing: 8, fontSize: 24 }]}
-                placeholder="0000"
-                placeholderTextColor={Colors.textLight}
-                keyboardType="number-pad"
-                value={otp}
-                onChangeText={setOtp}
-                maxLength={4}
-                autoFocus
-              />
-            </>
-          )}
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <StatusBar barStyle="light-content" />
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.hero}>
+          <View style={styles.brandRow}>
+            <View style={styles.logoMark}>
+              <Text style={styles.logoLetter}>R</Text>
+            </View>
+            <Text style={styles.brand}>Raydo</Text>
+          </View>
+          <Text style={styles.heroTitle}>
+            Ride with{'\n'}calm confidence.
+          </Text>
+          <Text style={styles.heroSub}>
+            Premium local rides — fair fares, live tracking, and verified partners.
+          </Text>
+          <View style={styles.heroChip}>
+            <Sparkles size={14} color={Colors.accent} />
+            <Text style={styles.heroChipText}>Bengaluru · Safe · On-time</Text>
+          </View>
         </View>
 
-        <TouchableOpacity 
-          style={[
-            styles.button, 
-            ((step === 'PHONE' && phone.length >= 10) || (step === 'OTP' && otp.length === 4)) 
-              ? styles.buttonActive 
-              : styles.buttonDisabled
-          ]}
-          onPress={handleNext}
-          disabled={(step === 'PHONE' && phone.length < 10) || (step === 'OTP' && otp.length < 4)}
-        >
-          <Text style={styles.buttonText}>Continue</Text>
-          <ArrowRight color={Colors.background} size={20} />
-        </TouchableOpacity>
+        <View style={styles.sheet}>
+          <Text style={styles.title}>
+            {step === 'PHONE' ? 'Welcome back' : 'Enter OTP'}
+          </Text>
+          <Text style={styles.subtitle}>
+            {step === 'PHONE'
+              ? 'Use your mobile number to continue booking rides.'
+              : `We sent a 4-digit code to +91 ${phone}`}
+          </Text>
 
-        {step === 'OTP' && (
-          <TouchableOpacity onPress={() => setStep('PHONE')} style={styles.backLink}>
-            <Text style={styles.backText}>Change Phone Number</Text>
+          <View style={styles.inputContainer}>
+            {step === 'PHONE' ? (
+              <>
+                <Phone color={Colors.textLight} size={18} />
+                <Text style={styles.prefix}>+91</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="98765 43210"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="phone-pad"
+                  value={phone}
+                  onChangeText={(t) => setPhone(t.replace(/\D/g, '').slice(0, 10))}
+                  maxLength={10}
+                  autoFocus
+                />
+              </>
+            ) : (
+              <>
+                <ShieldCheck color={Colors.textLight} size={18} />
+                <TextInput
+                  style={[styles.input, styles.otpInput]}
+                  placeholder="••••"
+                  placeholderTextColor={Colors.textLight}
+                  keyboardType="number-pad"
+                  value={otp}
+                  onChangeText={(t) => setOtp(t.replace(/\D/g, '').slice(0, 4))}
+                  maxLength={4}
+                  autoFocus
+                />
+              </>
+            )}
+          </View>
+
+          <TouchableOpacity
+            style={[styles.button, canContinue ? styles.buttonActive : styles.buttonDisabled]}
+            onPress={handleNext}
+            disabled={!canContinue}
+            activeOpacity={0.9}
+          >
+            <Text style={styles.buttonText}>
+              {step === 'PHONE' ? 'Send OTP' : 'Verify & continue'}
+            </Text>
+            <ArrowRight color={canContinue ? Colors.accent : Colors.textLight} size={18} />
           </TouchableOpacity>
-        )}
-      </View>
-    </KeyboardAvoidingView>
+
+          {step === 'OTP' ? (
+            <TouchableOpacity
+              onPress={() => {
+                setStep('PHONE');
+                setOtp('');
+              }}
+              style={styles.linkBtn}
+            >
+              <Text style={styles.linkText}>Change number</Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.hint}>Demo: any 10-digit number + any 4-digit OTP</Text>
+          )}
+        </View>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  root: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: Colors.primary,
   },
-  content: {
-    flex: 1,
+  flex: { flex: 1 },
+  hero: {
     paddingHorizontal: 24,
-    paddingTop: 120,
+    paddingTop: 20,
+    paddingBottom: 28,
+    gap: 12,
   },
-  title: {
-    fontSize: 28,
-    fontWeight: '400',
-    color: Colors.text,
+  brandRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
     marginBottom: 8,
   },
+  logoMark: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    backgroundColor: Colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  logoLetter: {
+    color: Colors.primary,
+    fontWeight: '900',
+    fontSize: 18,
+  },
+  brand: {
+    color: Colors.white,
+    fontSize: 17,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  heroTitle: {
+    color: Colors.white,
+    fontSize: 34,
+    fontWeight: '800',
+    lineHeight: 40,
+    letterSpacing: -0.5,
+  },
+  heroSub: {
+    color: 'rgba(255,255,255,0.72)',
+    fontSize: 15,
+    lineHeight: 22,
+    maxWidth: 320,
+  },
+  heroChip: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
+    marginTop: 4,
+  },
+  heroChipText: {
+    color: Colors.accent,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  sheet: {
+    flex: 1,
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingHorizontal: 24,
+    paddingTop: 28,
+    gap: 12,
+    ...Shadow.floating,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: Colors.text,
+  },
   subtitle: {
-    fontSize: 16,
-    color: Colors.textLight,
-    lineHeight: 24,
-    marginBottom: 40,
+    fontSize: 14,
+    color: Colors.textSecondary,
+    lineHeight: 20,
+    marginBottom: 8,
   },
   inputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: Colors.white,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderWidth: 1,
-    borderColor: '#E5E8EB',
-    marginBottom: 30,
-  },
-  icon: {
-    marginRight: 12,
+    borderRadius: Radius.lg,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    paddingHorizontal: 14,
+    minHeight: 56,
+    gap: 8,
   },
   prefix: {
-    fontSize: 18,
+    fontSize: 16,
+    fontWeight: '700',
     color: Colors.text,
-    marginRight: 12,
-    fontWeight: '500',
   },
   input: {
     flex: 1,
-    fontSize: 18,
+    fontSize: 17,
+    fontWeight: '600',
     color: Colors.text,
-    fontWeight: '500',
+    paddingVertical: 14,
+  },
+  otpInput: {
+    letterSpacing: 12,
+    fontSize: 24,
+    fontWeight: '800',
   },
   button: {
+    marginTop: 8,
+    borderRadius: Radius.lg,
+    minHeight: 56,
+    paddingHorizontal: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
-    borderRadius: 16,
-    marginTop: 20,
+    gap: 8,
   },
   buttonActive: {
     backgroundColor: Colors.primary,
   },
   buttonDisabled: {
-    backgroundColor: '#D1D5DB',
+    backgroundColor: Colors.surfaceMuted,
   },
   buttonText: {
-    color: Colors.background,
     fontSize: 16,
-    fontWeight: '600',
-    marginRight: 8,
+    fontWeight: '800',
+    color: Colors.white,
   },
-  backLink: {
-    marginTop: 24,
+  linkBtn: {
     alignItems: 'center',
+    paddingVertical: 12,
   },
-  backText: {
-    color: Colors.textLight,
+  linkText: {
+    color: Colors.primary,
+    fontWeight: '700',
     fontSize: 14,
-    fontWeight: '500',
-  }
+  },
+  hint: {
+    textAlign: 'center',
+    color: Colors.textLight,
+    fontSize: 12,
+    marginTop: 4,
+  },
 });

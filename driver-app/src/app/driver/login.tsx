@@ -7,48 +7,39 @@ import {
   View,
   Pressable,
 } from 'react-native';
-import { useRouter } from 'expo-router';
-import { ArrowRight, Phone, ShieldCheck, CarFront } from 'lucide-react-native';
+import { Href, useRouter } from 'expo-router';
+import { ArrowRight, KeyRound, CarFront, UserRound } from 'lucide-react-native';
 import { Screen } from '@/components/ui/Screen';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
-import { Colors, Radius, Shadow } from '@/constants/Colors';
+import { Colors, Shadow } from '@/constants/Colors';
+import { api } from '@/lib/api';
+import { useSession } from '@/context/SessionContext';
 
 export default function DriverLoginScreen() {
   const router = useRouter();
-  const [step, setStep] = useState<'PHONE' | 'OTP'>('PHONE');
-  const [phone, setPhone] = useState('');
-  const [otp, setOtp] = useState('');
+  const { setSession } = useSession();
+  const [loginId, setLoginId] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const canContinue =
-    step === 'PHONE' ? phone.replace(/\D/g, '').length === 10 : otp.length === 4;
-
-  const handleContinue = () => {
+  const handleLogin = async () => {
     setError('');
-    if (step === 'PHONE') {
-      if (phone.replace(/\D/g, '').length !== 10) {
-        setError('Enter a valid 10-digit mobile number');
-        return;
-      }
-      setLoading(true);
-      setTimeout(() => {
-        setLoading(false);
-        setStep('OTP');
-      }, 600);
-      return;
-    }
-
-    if (otp.length !== 4) {
-      setError('Enter the 4-digit OTP');
+    if (!loginId.trim() || !password) {
+      setError('Enter Driver ID and password from admin');
       return;
     }
     setLoading(true);
-    setTimeout(() => {
+    try {
+      const res = await api.driverLogin(loginId.trim(), password);
+      setSession(res.token, res.driver);
+      router.replace('/driver/(tabs)/home' as Href);
+    } catch (e: any) {
+      setError(e.message || 'Login failed');
+    } finally {
       setLoading(false);
-      router.replace('/driver/(tabs)/home');
-    }, 700);
+    }
   };
 
   return (
@@ -64,56 +55,39 @@ export default function DriverLoginScreen() {
             </View>
             <Text style={styles.brand}>Raydo Driver</Text>
           </View>
-          <Text style={styles.heroTitle}>Drive with{'\n'}confidence.</Text>
+          <Text style={styles.heroTitle}>Partner{'\n'}login</Text>
           <Text style={styles.heroSub}>
-            Partner app for accepting rides, tracking trips, and managing earnings — demo ready.
+            Login only after admin approves your KYC. Use the Driver ID & password shared by admin.
           </Text>
         </View>
 
         <View style={styles.sheet}>
-          <Text style={styles.sheetTitle}>
-            {step === 'PHONE' ? 'Partner login' : 'Verify OTP'}
-          </Text>
+          <Text style={styles.sheetTitle}>Credentials login</Text>
           <Text style={styles.sheetSub}>
-            {step === 'PHONE'
-              ? 'Enter your registered mobile number to continue.'
-              : `We sent a 4-digit code to +91 ${phone}`}
+            Not OTP — admin-issued ID & password after DL / vehicle verification.
           </Text>
 
-          {step === 'PHONE' ? (
-            <Input
-              label="Mobile number"
-              keyboardType="phone-pad"
-              maxLength={10}
-              value={phone}
-              onChangeText={(t) => setPhone(t.replace(/\D/g, ''))}
-              placeholder="98765 43210"
-              left={
-                <View style={styles.prefixWrap}>
-                  <Phone size={16} color={Colors.textLight} />
-                  <Text style={styles.prefix}>+91</Text>
-                </View>
-              }
-              error={error}
-            />
-          ) : (
-            <Input
-              label="One-time password"
-              keyboardType="number-pad"
-              maxLength={4}
-              value={otp}
-              onChangeText={(t) => setOtp(t.replace(/\D/g, ''))}
-              placeholder="••••"
-              left={<ShieldCheck size={18} color={Colors.textLight} />}
-              error={error}
-              style={{ letterSpacing: 10, fontSize: 22 }}
-            />
-          )}
+          <Input
+            label="Driver ID"
+            value={loginId}
+            onChangeText={(t) => setLoginId(t.toUpperCase())}
+            placeholder="RAYD1001"
+            autoCapitalize="characters"
+            left={<UserRound size={18} color={Colors.textLight} />}
+          />
+          <Input
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            placeholder="••••••••"
+            secureTextEntry
+            left={<KeyRound size={18} color={Colors.textLight} />}
+            error={error}
+          />
 
           <Button
-            title={step === 'PHONE' ? 'Send OTP' : 'Verify & continue'}
-            onPress={handleContinue}
-            disabled={!canContinue}
+            title="Login"
+            onPress={handleLogin}
             loading={loading}
             fullWidth
             size="lg"
@@ -121,20 +95,12 @@ export default function DriverLoginScreen() {
             style={{ marginTop: 8 }}
           />
 
-          {step === 'OTP' ? (
-            <Pressable
-              onPress={() => {
-                setStep('PHONE');
-                setOtp('');
-                setError('');
-              }}
-              style={styles.linkBtn}
-            >
-              <Text style={styles.linkText}>Change phone number</Text>
-            </Pressable>
-          ) : (
-            <Text style={styles.hint}>Demo: use any 10-digit number + any 4-digit OTP</Text>
-          )}
+          <Pressable onPress={() => router.push('/driver/kyc-apply' as Href)} style={styles.linkBtn}>
+            <Text style={styles.linkText}>New partner? Apply for KYC</Text>
+          </Pressable>
+          <Pressable onPress={() => router.push('/driver/kyc-status' as Href)} style={styles.linkBtn}>
+            <Text style={styles.linkMuted}>Check KYC approval status</Text>
+          </Pressable>
         </View>
       </KeyboardAvoidingView>
     </Screen>
@@ -179,7 +145,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.75)',
     fontSize: 15,
     lineHeight: 22,
-    maxWidth: 320,
+    maxWidth: 340,
   },
   sheet: {
     flex: 1,
@@ -202,30 +168,18 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 4,
   },
-  prefixWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginRight: 4,
-  },
-  prefix: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: Colors.text,
-  },
   linkBtn: {
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 8,
   },
   linkText: {
     color: Colors.primary,
     fontWeight: '700',
     fontSize: 14,
   },
-  hint: {
-    textAlign: 'center',
+  linkMuted: {
     color: Colors.textLight,
-    fontSize: 12,
-    marginTop: 4,
+    fontWeight: '600',
+    fontSize: 13,
   },
 });

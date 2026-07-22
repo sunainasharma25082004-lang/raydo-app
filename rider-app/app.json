@@ -8,7 +8,11 @@
     "scheme": "raydoapp",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Raydo uses your location to set pickup point and show nearby rides.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Raydo uses your location during active trips for live tracking."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +21,11 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION"
+      ]
     },
     "web": {
       "output": "static",
@@ -32,7 +40,16 @@
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
-      ]
+      ],
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Allow Raydo to use your location for pickup and live trip tracking.",
+          "locationAlwaysAndWhenInUsePermission": "Allow Raydo to use your location during active rides.",
+          "isAndroidForegroundServiceEnabled": false
+        }
+      ],
+      "react-native-maps"
     ],
     "experiments": {
       "typedRoutes": true

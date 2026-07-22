@@ -3,6 +3,7 @@ const router = express.Router();
 const mapController = require('../controllers/mapController');
 
 // All map endpoints using Geoapify
+router.get('/health', mapController.mapHealth);
 router.get('/routing', mapController.getRouting);
 router.get('/geocode', mapController.getGeocoding);
 router.get('/reverse-geocode', mapController.getReverseGeocoding);

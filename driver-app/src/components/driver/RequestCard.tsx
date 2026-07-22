@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { MapPin, Navigation2, Star, Wallet } from 'lucide-react-native';
 import { RideRequest, formatInr } from '@/data/mock';
@@ -14,21 +14,49 @@ type Props = {
 
 export function RequestCard({ request, seconds = 20, onAccept, onReject }: Props) {
   const [left, setLeft] = useState(seconds);
+  const onRejectRef = useRef(onReject);
+  const finishedRef = useRef(false);
+
+  onRejectRef.current = onReject;
 
   useEffect(() => {
+    finishedRef.current = false;
     setLeft(seconds);
-    const t = setInterval(() => {
-      setLeft((v) => {
-        if (v <= 1) {
-          clearInterval(t);
-          onReject();
-          return 0;
+    let remaining = seconds;
+
+    const interval = setInterval(() => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        clearInterval(interval);
+        setLeft(0);
+        if (!finishedRef.current) {
+          finishedRef.current = true;
+          // Next tick — never inside setState updater
+          setTimeout(() => {
+            onRejectRef.current();
+          }, 0);
         }
-        return v - 1;
-      });
+        return;
+      }
+      setLeft(remaining);
     }, 1000);
-    return () => clearInterval(t);
-  }, [request.id, seconds, onReject]);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [request.id, seconds]);
+
+  const handleReject = () => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    setTimeout(() => onReject(), 0);
+  };
+
+  const handleAccept = () => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    setTimeout(() => onAccept(), 0);
+  };
 
   const progress = left / seconds;
 
@@ -93,11 +121,11 @@ export function RequestCard({ request, seconds = 20, onAccept, onReject }: Props
       </View>
 
       <View style={styles.actions}>
-        <Button title="Decline" variant="outline" onPress={onReject} style={styles.flex} />
+        <Button title="Decline" variant="outline" onPress={handleReject} style={styles.flex} />
         <Button
           title="Accept"
           variant="success"
-          onPress={onAccept}
+          onPress={handleAccept}
           style={styles.flex}
           leftIcon={<Navigation2 size={16} color={Colors.white} />}
         />

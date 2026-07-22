@@ -59,10 +59,13 @@ exports.verifyOTP = async (req, res) => {
         user = await User.create({ phone });
       }
     } else if (role === 'driver') {
-      user = await Driver.findOne({ phone });
-      if (!user) {
-        user = await Driver.create({ phone });
-      }
+      // Drivers must use ID/password login after admin KYC approval — not OTP signup
+      return res.status(400).json({
+        message:
+          'Drivers cannot login via OTP. Apply for KYC first. After admin approval, login with Driver ID & password.',
+        useEndpoint: 'POST /api/drivers/login',
+        applyKyc: 'POST /api/kyc/apply',
+      });
     } else {
       return res.status(400).json({ message: 'Invalid role' });
     }

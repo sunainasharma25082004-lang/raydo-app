@@ -1,31 +1,101 @@
-import React from 'react';
-import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Alert, Linking, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
-import {
-  MessageCircle,
-  Navigation,
-  Phone,
-  MapPin,
-  Flag,
-} from 'lucide-react-native';
+import { MessageCircle, Navigation, Phone, MapPin, Flag } from 'lucide-react-native';
+import { useFocusEffect } from 'expo-router';
 import { Screen } from '@/components/ui/Screen';
 import { MapCanvas } from '@/components/ui/MapCanvas';
 import { Button } from '@/components/ui/Button';
 import { useDriver } from '@/context/DriverContext';
+import { useSession } from '@/context/SessionContext';
+import { useLiveLocationSync } from '@/hooks/use-live-location-sync';
+import { useCurrentLocation } from '@/hooks/use-current-location';
+import { api, LiveRide } from '@/lib/api';
 import { formatInr } from '@/data/mock';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 
 export default function TripScreen() {
   const router = useRouter();
-  const {
-    tripStatus,
-    activeRequest,
-    arrivedAtPickup,
-    startTrip,
-    completeTrip,
-  } = useDriver();
+  const { token } = useSession();
+  const { tripStatus, activeRequest, arrivedAtPickup, startTrip, completeTrip, resetToIdle } =
+    useDriver();
+  const [liveRide, setLiveRide] = useState<LiveRide | null>(null);
+  const [loading, setLoading] = useState(true);
+  const { coords, address } = useCurrentLocation({ watch: true, highAccuracy: true });
 
-  if (!activeRequest) {
+  const loadActive = useCallback(async () => {
+    if (!token) {
+      setLoading(false);
+      return;
+    }
+    try {
+      const res = await api.activeRide(token);
+      setLiveRide(res.ride);
+    } catch {
+      /* ignore */
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadActive();
+      const t = setInterval(loadActive, 5000);
+      return () => clearInterval(t);
+    }, [loadActive]),
+  );
+
+  // Stream GPS to rider while on this trip
+  useLiveLocationSync({
+    enabled: true,
+    isOnline: true,
+    rideId: liveRide?.id || null,
+  });
+
+  const updateStatus = async (status: string) => {
+    if (!token || !liveRide) {
+      // fallback local demo flow
+      if (status === 'Arrived') arrivedAtPickup();
+      else if (status === 'In_Progress') startTrip();
+      else if (status === 'Completed') {
+        completeTrip(5);
+        router.replace('/driver/complete');
+      }
+      return;
+    }
+    try {
+      const res = await api.updateRideStatus(token, liveRide.id, status);
+      setLiveRide(res.ride);
+      if (status === 'Arrived') arrivedAtPickup();
+      if (status === 'In_Progress') startTrip();
+      if (status === 'Completed') {
+        completeTrip(5);
+        router.replace('/driver/complete');
+      }
+    } catch (e: any) {
+      Alert.alert('Update failed', e.message);
+    }
+  };
+
+  const pickup = liveRide?.pickup || activeRequest?.pickup || 'Pickup';
+  const drop = liveRide?.drop || activeRequest?.drop || 'Drop';
+  const riderName = liveRide?.riderName || activeRequest?.riderName || 'Rider';
+  const fare = liveRide?.fare ?? activeRequest?.fare ?? 0;
+  const phone = liveRide?.riderPhone || '';
+
+  if (loading && !activeRequest && !liveRide) {
+    return (
+      <Screen>
+        <View style={styles.empty}>
+          <ActivityIndicator color={Colors.primary} />
+          <Text style={styles.emptyText}>Loading live trip…</Text>
+        </View>
+      </Screen>
+    );
+  }
+
+  if (!activeRequest && !liveRide) {
     return (
       <Screen>
         <View style={styles.empty}>
@@ -37,30 +107,27 @@ export default function TripScreen() {
   }
 
   const stage =
-    tripStatus === 'to_pickup'
+    tripStatus === 'to_pickup' || liveRide?.status === 'Accepted'
       ? {
           title: 'Navigate to pickup',
-          subtitle: activeRequest.pickup,
+          subtitle: pickup,
           cta: 'Arrived at pickup',
-          onCta: arrivedAtPickup,
+          onCta: () => updateStatus('Arrived'),
           mapLabel: 'En route to rider',
         }
-      : tripStatus === 'waiting'
+      : tripStatus === 'waiting' || liveRide?.status === 'Arrived'
         ? {
             title: 'Waiting for rider',
-            subtitle: activeRequest.riderName,
+            subtitle: riderName,
             cta: 'Start trip',
-            onCta: startTrip,
+            onCta: () => updateStatus('In_Progress'),
             mapLabel: 'At pickup point',
           }
         : {
             title: 'Trip in progress',
-            subtitle: activeRequest.drop,
+            subtitle: drop,
             cta: 'Complete trip',
-            onCta: () => {
-              completeTrip(5);
-              router.replace('/driver/complete');
-            },
+            onCta: () => updateStatus('Completed'),
             mapLabel: 'Heading to drop',
           };
 
@@ -69,78 +136,78 @@ export default function TripScreen() {
       <View style={styles.map}>
         <MapCanvas
           label={stage.mapLabel}
-          subtitle={`${activeRequest.distanceKm} km · ${activeRequest.etaMin} min ETA`}
+          subtitle={address || 'Sharing live GPS with rider'}
           showRoute
+          coords={coords}
+          loading={!coords}
         />
         <View style={styles.topChip}>
           <Navigation size={14} color={Colors.white} />
           <Text style={styles.topChipText}>
-            {tripStatus === 'in_trip' ? 'ON TRIP' : tripStatus === 'waiting' ? 'WAITING' : 'TO PICKUP'}
+            {coords
+              ? `LIVE ${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`
+              : 'Getting GPS…'}
           </Text>
         </View>
       </View>
 
       <View style={styles.sheet}>
-        <View style={styles.handle} />
+        <Text style={styles.kicker}>{liveRide?.status || tripStatus}</Text>
+        <Text style={styles.title}>{stage.title}</Text>
+        <Text style={styles.sub}>{stage.subtitle}</Text>
 
-        <View style={styles.headerRow}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.kicker}>{stage.title}</Text>
-            <Text style={styles.title} numberOfLines={1}>
-              {stage.subtitle}
+        {coords ? (
+          <Text style={styles.gps}>
+            Your live location updates on the rider map every ~2–3 seconds
+          </Text>
+        ) : (
+          <Text style={styles.gpsWarn}>
+            Allow location access so the rider can track you
+          </Text>
+        )}
+
+        <View style={styles.route}>
+          <View style={styles.routeRow}>
+            <MapPin size={16} color={Colors.success} />
+            <Text style={styles.routeText} numberOfLines={2}>
+              {pickup}
             </Text>
           </View>
-          <View style={styles.fareBox}>
-            <Text style={styles.fare}>{formatInr(activeRequest.fare)}</Text>
-            <Text style={styles.pay}>{activeRequest.payment}</Text>
+          <View style={styles.routeRow}>
+            <Flag size={16} color={Colors.accent} />
+            <Text style={styles.routeText} numberOfLines={2}>
+              {drop}
+            </Text>
           </View>
         </View>
 
-        <View style={styles.routeCard}>
-          <View style={styles.routeRow}>
-            <View style={styles.iconBubble}>
-              <MapPin size={16} color={Colors.success} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.routeLabel}>Pickup</Text>
-              <Text style={styles.routeValue} numberOfLines={1}>
-                {activeRequest.pickup}
-              </Text>
-            </View>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.routeRow}>
-            <View style={[styles.iconBubble, { backgroundColor: Colors.accentSoft }]}>
-              <Flag size={16} color={Colors.accentDark} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.routeLabel}>Drop</Text>
-              <Text style={styles.routeValue} numberOfLines={1}>
-                {activeRequest.drop}
-              </Text>
-            </View>
-          </View>
+        <View style={styles.metaRow}>
+          <Text style={styles.fare}>{formatInr(fare)}</Text>
+          <Text style={styles.rider}>{riderName}</Text>
         </View>
 
-        <View style={styles.contactRow}>
+        <View style={styles.actionsRow}>
           <Pressable
-            style={styles.contactBtn}
-            onPress={() => Linking.openURL('tel:9876543210')}
+            style={styles.iconBtn}
+            onPress={() => phone && Linking.openURL(`tel:${phone}`)}
           >
             <Phone size={18} color={Colors.primary} />
-            <Text style={styles.contactText}>Call</Text>
           </Pressable>
-          <Pressable style={styles.contactBtn}>
+          <Pressable style={styles.iconBtn}>
             <MessageCircle size={18} color={Colors.primary} />
-            <Text style={styles.contactText}>Chat</Text>
           </Pressable>
-          <View style={styles.riderChip}>
-            <Text style={styles.riderName}>{activeRequest.riderName}</Text>
-            <Text style={styles.riderMeta}>★ {activeRequest.riderRating}</Text>
-          </View>
         </View>
 
-        <Button title={stage.cta} onPress={stage.onCta} fullWidth size="lg" variant="primary" />
+        <Button title={stage.cta} fullWidth onPress={stage.onCta} />
+        <Button
+          title="End / leave trip"
+          variant="outline"
+          fullWidth
+          onPress={() => {
+            resetToIdle();
+            router.replace('/driver/(tabs)/home');
+          }}
+        />
       </View>
     </Screen>
   );
@@ -148,169 +215,64 @@ export default function TripScreen() {
 
 const styles = StyleSheet.create({
   screen: { backgroundColor: Colors.background },
-  map: { height: '46%', minHeight: 280 },
+  map: { height: '38%', minHeight: 220 },
   topChip: {
     position: 'absolute',
-    top: 16,
+    top: 12,
     alignSelf: 'center',
-    left: '50%',
-    marginLeft: -70,
-    width: 140,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
     gap: 6,
     backgroundColor: Colors.primary,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     borderRadius: Radius.full,
-    ...Shadow.soft,
   },
-  topChipText: {
-    color: Colors.white,
-    fontWeight: '800',
-    fontSize: 12,
-    letterSpacing: 0.6,
-  },
+  topChipText: { color: Colors.white, fontWeight: '800', fontSize: 11 },
   sheet: {
     flex: 1,
-    marginTop: -24,
     backgroundColor: Colors.background,
+    marginTop: -18,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    gap: 14,
-  },
-  handle: {
-    alignSelf: 'center',
-    width: 42,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.borderStrong,
-  },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
+    padding: 20,
+    gap: 10,
+    ...Shadow.floating,
   },
   kicker: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: Colors.textLight,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.text,
-    marginTop: 2,
-  },
-  fareBox: {
-    backgroundColor: Colors.accentSoft,
-    borderRadius: Radius.md,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    alignItems: 'flex-end',
-  },
-  fare: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: Colors.primary,
-  },
-  pay: {
     fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textSecondary,
+    fontWeight: '800',
+    color: Colors.accentDark,
+    textTransform: 'uppercase',
   },
-  routeCard: {
+  title: { fontSize: 22, fontWeight: '800', color: Colors.text },
+  sub: { fontSize: 14, color: Colors.textSecondary, fontWeight: '600' },
+  gps: { fontSize: 12, color: Colors.success, fontWeight: '700' },
+  gpsWarn: { fontSize: 12, color: Colors.warning, fontWeight: '700' },
+  route: {
     backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 14,
-    ...Shadow.soft,
-  },
-  routeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconBubble: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: Colors.successSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  routeLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.textLight,
-    textTransform: 'uppercase',
-  },
-  routeValue: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: Colors.text,
-    marginTop: 2,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: Colors.border,
-    marginVertical: 12,
-    marginLeft: 48,
-  },
-  contactRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    borderRadius: Radius.md,
+    padding: 12,
     gap: 10,
+    borderWidth: 1,
+    borderColor: Colors.border,
   },
-  contactBtn: {
-    width: 72,
-    height: 56,
-    borderRadius: Radius.md,
+  routeRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  routeText: { flex: 1, fontSize: 13, fontWeight: '600', color: Colors.text },
+  metaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  fare: { fontSize: 24, fontWeight: '800', color: Colors.primary },
+  rider: { fontSize: 14, fontWeight: '700', color: Colors.textSecondary },
+  actionsRow: { flexDirection: 'row', gap: 10 },
+  iconBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 14,
     backgroundColor: Colors.surface,
     borderWidth: 1,
     borderColor: Colors.border,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
   },
-  contactText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: Colors.primary,
-  },
-  riderChip: {
-    flex: 1,
-    height: 56,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.primary,
-    paddingHorizontal: 14,
-    justifyContent: 'center',
-  },
-  riderName: {
-    color: Colors.white,
-    fontWeight: '800',
-    fontSize: 14,
-  },
-  riderMeta: {
-    color: 'rgba(255,255,255,0.75)',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  empty: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    padding: 24,
-  },
-  emptyText: {
-    fontSize: 16,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
+  empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
+  emptyText: { color: Colors.textSecondary, fontWeight: '600' },
 });

@@ -1,84 +1,178 @@
 const axios = require('axios');
 
-// Get API Key from Environment
-const API_KEY = process.env.GEOPIFY_ACCESS_TOKEN;
+// Strip accidental quotes from .env values
+function envKey(name) {
+  const v = process.env[name];
+  if (!v) return null;
+  return String(v).trim().replace(/^["']|["']$/g, '');
+}
+
+const API_KEY = envKey('GEOPIFY_ACCESS_TOKEN');
 const BASE_URL = 'https://api.geoapify.com';
+
+function ensureKey(res) {
+  if (!API_KEY || API_KEY.includes('your_') || API_KEY.length < 10) {
+    res.status(500).json({
+      message: 'Geoapify API key missing. Set GEOPIFY_ACCESS_TOKEN in backend/.env',
+      configured: false,
+    });
+    return false;
+  }
+  return true;
+}
+
+/** Health check — is live map API working? */
+exports.mapHealth = async (req, res) => {
+  if (!ensureKey(res)) return;
+  try {
+    const response = await axios.get(`${BASE_URL}/v1/geocode/reverse`, {
+      params: { lat: 12.9716, lon: 77.5946, apiKey: API_KEY },
+      timeout: 8000,
+    });
+    const place = response.data?.features?.[0]?.properties?.formatted || null;
+    res.json({
+      ok: true,
+      provider: 'geoapify',
+      configured: true,
+      sample: place,
+    });
+  } catch (error) {
+    res.status(502).json({
+      ok: false,
+      configured: true,
+      message: 'Geoapify request failed',
+      detail: error?.response?.data || error.message,
+    });
+  }
+};
 
 // 1. Routing API
 exports.getRouting = async (req, res) => {
   try {
+    if (!ensureKey(res)) return;
     const { waypoints, mode } = req.query; // waypoints e.g., "lat1,lon1|lat2,lon2"
     if (!waypoints) return res.status(400).json({ message: 'Waypoints are required' });
-    
+
     const response = await axios.get(`${BASE_URL}/v1/routing`, {
       params: {
         waypoints,
         mode: mode || 'drive',
-        apiKey: API_KEY
-      }
+        apiKey: API_KEY,
+      },
+      timeout: 12000,
     });
     res.status(200).json(response.data);
   } catch (error) {
     console.error('Error in Routing API:', error?.response?.data || error.message);
-    res.status(500).json({ message: 'Error fetching routing data' });
+    res.status(500).json({
+      message: 'Error fetching routing data',
+      detail: error?.response?.data || error.message,
+    });
   }
 };
 
 // 2. Geocoding API
 exports.getGeocoding = async (req, res) => {
   try {
-    const { text } = req.query; // e.g., address string
+    if (!ensureKey(res)) return;
+    const { text, bias } = req.query; // e.g., address string; bias=proximity:lng,lat
     if (!text) return res.status(400).json({ message: 'Search text is required' });
 
+    const params = {
+      text,
+      apiKey: API_KEY,
+      limit: 8,
+      filter: 'countrycode:in',
+    };
+    if (bias) params.bias = bias;
+
     const response = await axios.get(`${BASE_URL}/v1/geocode/search`, {
-      params: {
-        text,
-        apiKey: API_KEY
-      }
+      params,
+      timeout: 10000,
     });
     res.status(200).json(response.data);
   } catch (error) {
     console.error('Error in Geocoding API:', error?.response?.data || error.message);
-    res.status(500).json({ message: 'Error fetching geocoding data' });
+    res.status(500).json({
+      message: 'Error fetching geocoding data',
+      detail: error?.response?.data || error.message,
+    });
   }
 };
 
 // 3. Reverse Geocoding API
 exports.getReverseGeocoding = async (req, res) => {
   try {
-    const { lat, lon } = req.query;
-    if (!lat || !lon) return res.status(400).json({ message: 'Latitude and longitude are required' });
+    if (!ensureKey(res)) return;
+    const { lat, lon, lng } = req.query;
+    const longitude = lon || lng;
+    if (!lat || !longitude) {
+      return res.status(400).json({ message: 'Latitude and longitude are required' });
+    }
 
     const response = await axios.get(`${BASE_URL}/v1/geocode/reverse`, {
       params: {
         lat,
-        lon,
-        apiKey: API_KEY
-      }
+        lon: longitude,
+        apiKey: API_KEY,
+      },
+      timeout: 10000,
     });
-    res.status(200).json(response.data);
+
+    // Convenience fields for mobile apps
+    const props = response.data?.features?.[0]?.properties || {};
+    res.status(200).json({
+      ...response.data,
+      formatted: props.formatted || props.address_line1 || null,
+      lat: Number(lat),
+      lng: Number(longitude),
+    });
   } catch (error) {
     console.error('Error in Reverse Geocoding API:', error?.response?.data || error.message);
-    res.status(500).json({ message: 'Error fetching reverse geocoding data' });
+    res.status(500).json({
+      message: 'Error fetching reverse geocoding data',
+      detail: error?.response?.data || error.message,
+    });
   }
 };
 
 // 4. Autocomplete API
 exports.getAutocomplete = async (req, res) => {
   try {
-    const { text } = req.query;
+    if (!ensureKey(res)) return;
+    const { text, bias } = req.query;
     if (!text) return res.status(400).json({ message: 'Search text is required' });
 
+    const params = {
+      text,
+      apiKey: API_KEY,
+      limit: 8,
+      filter: 'countrycode:in',
+    };
+    if (bias) params.bias = bias;
+
     const response = await axios.get(`${BASE_URL}/v1/geocode/autocomplete`, {
-      params: {
-        text,
-        apiKey: API_KEY
-      }
+      params,
+      timeout: 10000,
     });
-    res.status(200).json(response.data);
+
+    // Flatten for easy mobile consumption
+    const suggestions = (response.data?.features || []).map((f) => ({
+      id: f.properties?.place_id || f.properties?.osm_id || String(Math.random()),
+      label: f.properties?.formatted || f.properties?.address_line1 || text,
+      name: f.properties?.name || f.properties?.address_line1 || '',
+      city: f.properties?.city || f.properties?.county || '',
+      lat: f.properties?.lat ?? f.geometry?.coordinates?.[1],
+      lng: f.properties?.lon ?? f.geometry?.coordinates?.[0],
+    }));
+
+    res.status(200).json({ ...response.data, suggestions });
   } catch (error) {
     console.error('Error in Autocomplete API:', error?.response?.data || error.message);
-    res.status(500).json({ message: 'Error fetching autocomplete data' });
+    res.status(500).json({
+      message: 'Error fetching autocomplete data',
+      detail: error?.response?.data || error.message,
+    });
   }
 };
 

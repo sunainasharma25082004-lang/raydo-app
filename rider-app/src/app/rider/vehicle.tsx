@@ -1,288 +1,353 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Dimensions, Image } from 'react-native';
-import { useRouter } from 'expo-router';
-import { Colors } from '@/constants/Colors';
-import { MapPin, Edit2, Zap, ArrowRight, ShieldCheck } from 'lucide-react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Dimensions,
+  StatusBar,
+} from 'react-native';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Colors, Radius, Shadow } from '@/constants/Colors';
+import { ArrowLeft, Zap, Check, ChevronRight } from 'lucide-react-native';
+import { useCurrentLocation } from '@/hooks/use-current-location';
 
-const { height, width } = Dimensions.get('window');
+const { height } = Dimensions.get('window');
 
 const VEHICLES = [
   {
-    id: 'bike',
-    name: 'Bike',
-    eta: '2 min away',
+    id: 'Scooty',
+    name: 'Scooty',
+    eta: '2 min',
     fare: '₹45',
     surge: false,
-    icon: '🛵'
+    icon: '🛵',
+    match: 'Two-wheeler',
+    seats: '1 seat',
   },
   {
-    id: 'auto',
+    id: 'Bike',
+    name: 'Bike',
+    eta: '3 min',
+    fare: '₹50',
+    surge: false,
+    icon: '🏍',
+    match: 'Two-wheeler',
+    seats: '1 seat',
+  },
+  {
+    id: 'Auto',
     name: 'Auto',
-    eta: '4 min away',
+    eta: '4 min',
     fare: '₹85',
     surge: true,
-    icon: '🛺'
+    icon: '🛺',
+    match: 'Auto only',
+    seats: '3 seats',
   },
   {
-    id: 'erickshaw',
-    name: 'E-Rickshaw',
-    eta: '5 min away',
-    fare: '₹60',
+    id: 'Car',
+    name: 'Car',
+    eta: '6 min',
+    fare: '₹180',
     surge: false,
-    icon: '🛺' // Simplified emoji for placeholder
-  }
+    icon: '🚗',
+    match: 'Car only',
+    seats: '4 seats',
+  },
 ];
 
 export default function VehicleSelectionScreen() {
   const router = useRouter();
-  const [selectedVehicle, setSelectedVehicle] = useState('auto');
+  const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{
+    pickup?: string;
+    drop?: string;
+    pickupLat?: string;
+    pickupLng?: string;
+  }>();
+  const { address, coords } = useCurrentLocation({ watch: false });
+  const [selectedVehicle, setSelectedVehicle] = useState('Auto');
 
-  const selectedData = VEHICLES.find(v => v.id === selectedVehicle);
+  const selectedData = VEHICLES.find((v) => v.id === selectedVehicle);
+  const pickupLabel = String(params.pickup || address || 'Current location');
+  const dropLabel = String(params.drop || 'Destination');
+  const lat = params.pickupLat || (coords ? String(coords.latitude) : '');
+  const lng = params.pickupLng || (coords ? String(coords.longitude) : '');
 
   return (
     <View style={styles.container}>
-      {/* Blurred/Dimmed Map Background */}
-      <View style={styles.mapContainer}>
-        <Image 
-          source={{ uri: 'https://images.unsplash.com/photo-1524661135-423995f22d0b?auto=format&fit=crop&q=80&sat=-100&bri=20' }} 
-          style={styles.mapImage}
-          blurRadius={10}
-        />
-        <View style={styles.mapDimmer} />
+      <StatusBar barStyle="light-content" />
+      <View style={[styles.mapHero, { paddingTop: Math.max(insets.top, 12) + 8 }]}>
+        <View style={styles.mapDecor} />
+        <TouchableOpacity style={styles.backBtn} onPress={() => router.back()}>
+          <ArrowLeft color={Colors.white} size={22} />
+        </TouchableOpacity>
+        <Text style={styles.heroTitle}>Choose your ride</Text>
+        <Text style={styles.heroSub}>Matched drivers only for this vehicle type</Text>
+
+        <View style={styles.routeCard}>
+          <View style={styles.routeDots}>
+            <View style={styles.dotPick} />
+            <View style={styles.dash} />
+            <View style={styles.dotDrop} />
+          </View>
+          <View style={{ flex: 1, gap: 10 }}>
+            <View>
+              <Text style={styles.routeLabel}>PICKUP</Text>
+              <Text style={styles.routeText} numberOfLines={1}>
+                {pickupLabel}
+              </Text>
+            </View>
+            <View>
+              <Text style={styles.routeLabel}>DROP</Text>
+              <Text style={[styles.routeText, { fontWeight: '800' }]} numberOfLines={1}>
+                {dropLabel}
+              </Text>
+            </View>
+          </View>
+        </View>
       </View>
 
-      {/* Bottom Sheet */}
       <View style={styles.sheet}>
-        <View style={styles.dragHandle} />
-        
-        {/* Route Info */}
-        <View style={styles.routeInfo}>
-          <View style={styles.routeLine}>
-            <View style={styles.routeDot} />
-            <View style={styles.routeDash} />
-            <View style={[styles.routeDot, { backgroundColor: Colors.accent }]} />
-          </View>
-          <View style={styles.addressBox}>
-            <Text style={styles.addressText} numberOfLines={1}>Current Location</Text>
-            <Text style={[styles.addressText, { color: Colors.primary, fontWeight: '600' }]} numberOfLines={1}>Phoenix Marketcity</Text>
-          </View>
-          <TouchableOpacity style={styles.editIcon}>
-            <Edit2 color={Colors.textLight} size={16} />
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.divider} />
-
-        {/* Vehicle List */}
-        <ScrollView style={styles.vehicleList} showsVerticalScrollIndicator={false}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 20 }}>
           {VEHICLES.map((vehicle) => {
             const isSelected = selectedVehicle === vehicle.id;
             return (
               <TouchableOpacity
                 key={vehicle.id}
-                style={[
-                  styles.vehicleCard,
-                  isSelected && styles.vehicleCardSelected
-                ]}
+                style={[styles.vehicleCard, isSelected && styles.vehicleCardSelected]}
                 onPress={() => setSelectedVehicle(vehicle.id)}
-                activeOpacity={0.7}
+                activeOpacity={0.88}
               >
-                <View style={styles.vehicleIconBox}>
-                  <Text style={{ fontSize: 24 }}>{vehicle.icon}</Text>
+                <View style={[styles.iconBox, isSelected && styles.iconBoxOn]}>
+                  <Text style={{ fontSize: 26 }}>{vehicle.icon}</Text>
                 </View>
-                
-                <View style={styles.vehicleDetails}>
-                  <Text style={styles.vehicleName}>{vehicle.name}</Text>
-                  <Text style={styles.vehicleEta}>{vehicle.eta}</Text>
+                <View style={styles.details}>
+                  <View style={styles.nameRow}>
+                    <Text style={styles.vehicleName}>{vehicle.name}</Text>
+                    {vehicle.surge ? (
+                      <View style={styles.surgePill}>
+                        <Zap size={10} color={Colors.error} />
+                        <Text style={styles.surgeText}>Busy</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <Text style={styles.meta}>
+                    {vehicle.eta} away · {vehicle.seats} · {vehicle.match}
+                  </Text>
                 </View>
-                
-                <View style={styles.fareDetails}>
-                  <Text style={styles.vehicleFare}>{vehicle.fare}</Text>
-                  {vehicle.surge && (
-                    <Text style={styles.surgeText}>High demand</Text>
-                  )}
+                <View style={styles.fareCol}>
+                  <Text style={styles.fare}>{vehicle.fare}</Text>
+                  {isSelected ? (
+                    <View style={styles.check}>
+                      <Check size={12} color={Colors.white} strokeWidth={3} />
+                    </View>
+                  ) : null}
                 </View>
               </TouchableOpacity>
             );
           })}
         </ScrollView>
 
-        {/* Footer */}
-        <View style={styles.footer}>
-          <TouchableOpacity 
-            style={styles.confirmButton}
-            onPress={() => router.push('/rider/tracking')}
-          >
-            <Text style={styles.confirmText}>Confirm {selectedData?.name}</Text>
-          </TouchableOpacity>
-        </View>
-
+        <TouchableOpacity
+          style={styles.confirmButton}
+          activeOpacity={0.92}
+          onPress={() =>
+            router.push({
+              pathname: '/rider/tracking',
+              params: {
+                vehicleType: selectedData?.id || 'Auto',
+                vehicleName: selectedData?.name || 'Auto',
+                fare: selectedData?.fare || '₹0',
+                pickup: pickupLabel,
+                drop: dropLabel,
+                pickupLat: lat,
+                pickupLng: lng,
+              },
+            })
+          }
+        >
+          <Text style={styles.confirmText}>Confirm {selectedData?.name}</Text>
+          <ChevronRight color={Colors.accent} size={20} />
+        </TouchableOpacity>
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
+  container: { flex: 1, backgroundColor: Colors.background },
+  mapHero: {
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 20,
+    paddingBottom: 28,
+    minHeight: height * 0.32,
   },
-  mapContainer: {
-    height: height * 0.4,
-    width: '100%',
+  mapDecor: {
     position: 'absolute',
-    top: 0,
+    right: -40,
+    top: 40,
+    width: 180,
+    height: 180,
+    borderRadius: 90,
+    backgroundColor: 'rgba(201,162,93,0.12)',
   },
-  mapImage: {
-    width: '100%',
-    height: '100%',
-    resizeMode: 'cover',
-  },
-  mapDimmer: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(27, 42, 74, 0.4)', // Deep Indigo with opacity
-  },
-  sheet: {
-    position: 'absolute',
-    bottom: 0,
-    width: '100%',
-    height: height * 0.75,
-    backgroundColor: Colors.white,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -10 },
-    shadowOpacity: 0.1,
-    shadowRadius: 20,
-    elevation: 20,
-  },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#E5E8EB',
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  routeInfo: {
-    flexDirection: 'row',
+  backBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     alignItems: 'center',
-    paddingHorizontal: 24,
+    justifyContent: 'center',
     marginBottom: 16,
   },
-  routeLine: {
-    alignItems: 'center',
-    marginRight: 16,
-    height: 40,
-    justifyContent: 'space-between',
+  heroTitle: {
+    color: Colors.white,
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: -0.3,
   },
-  routeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.textLight,
+  heroSub: {
+    color: 'rgba(255,255,255,0.65)',
+    fontSize: 13,
+    marginTop: 4,
+    marginBottom: 18,
+    fontWeight: '500',
   },
-  routeDash: {
-    width: 1,
+  routeCard: {
+    flexDirection: 'row',
+    backgroundColor: Colors.white,
+    borderRadius: Radius.xl,
+    padding: 14,
+    gap: 12,
+    ...Shadow.card,
+  },
+  routeDots: { alignItems: 'center', paddingTop: 4, width: 14 },
+  dotPick: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.primary,
+  },
+  dash: {
+    width: 2,
     flex: 1,
-    backgroundColor: '#E5E8EB',
+    minHeight: 22,
+    backgroundColor: Colors.borderStrong,
     marginVertical: 4,
   },
-  addressBox: {
-    flex: 1,
-    justifyContent: 'space-between',
-    height: 40,
+  dotDrop: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.accent,
   },
-  addressText: {
-    fontSize: 15,
+  routeLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: Colors.textLight,
+    letterSpacing: 0.6,
+  },
+  routeText: {
+    fontSize: 14,
+    fontWeight: '600',
     color: Colors.text,
+    marginTop: 2,
   },
-  editIcon: {
-    padding: 8,
-    backgroundColor: '#F3F4F6',
-    borderRadius: 16,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#F3F4F6',
-    marginBottom: 12,
-  },
-  vehicleList: {
+  sheet: {
     flex: 1,
-    paddingHorizontal: 20,
+    marginTop: -12,
+    backgroundColor: Colors.background,
+    borderTopLeftRadius: Radius.xxl,
+    borderTopRightRadius: Radius.xxl,
+    paddingTop: 16,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   vehicleCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    borderRadius: 16,
+    padding: 14,
+    borderRadius: Radius.xl,
     backgroundColor: Colors.white,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    marginBottom: 12,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    marginBottom: 10,
   },
   vehicleCardSelected: {
     borderColor: Colors.accent,
-    backgroundColor: '#FAF8F4', // Soft Ivory
+    backgroundColor: Colors.accentSoft,
+    ...Shadow.soft,
   },
-  vehicleIconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#F3F4F6',
+  iconBox: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: Colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 12,
   },
-  vehicleDetails: {
-    flex: 1,
+  iconBoxOn: {
+    backgroundColor: Colors.white,
   },
+  details: { flex: 1 },
+  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   vehicleName: {
-    fontSize: 18,
-    fontWeight: '600',
+    fontSize: 17,
+    fontWeight: '800',
     color: Colors.text,
-    marginBottom: 4,
   },
-  vehicleEta: {
-    fontSize: 13,
-    color: Colors.textLight,
-  },
-  fareDetails: {
-    alignItems: 'flex-end',
-  },
-  vehicleFare: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: Colors.primary,
+  surgePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    backgroundColor: Colors.errorSoft,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: Radius.full,
   },
   surgeText: {
-    fontSize: 12,
+    fontSize: 10,
+    fontWeight: '800',
     color: Colors.error,
-    marginTop: 4,
-    fontWeight: '500',
   },
-  footer: {
-    paddingHorizontal: 24,
-    paddingTop: 16,
-    paddingBottom: 32, // Safe area for bottom
-    backgroundColor: Colors.white,
-    borderTopWidth: 1,
-    borderTopColor: '#F3F4F6',
+  meta: {
+    fontSize: 12,
+    color: Colors.textLight,
+    marginTop: 4,
+    fontWeight: '600',
+  },
+  fareCol: { alignItems: 'flex-end', gap: 6 },
+  fare: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: Colors.primary,
+  },
+  check: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: Colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   confirmButton: {
     backgroundColor: Colors.primary,
-    paddingVertical: 18,
-    borderRadius: 16,
+    borderRadius: Radius.xl,
+    minHeight: 56,
+    flexDirection: 'row',
     alignItems: 'center',
-    shadowColor: Colors.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
+    justifyContent: 'center',
+    gap: 6,
+    ...Shadow.card,
   },
   confirmText: {
-    color: Colors.accent,
+    color: Colors.white,
     fontSize: 16,
-    fontWeight: '600',
-  }
+    fontWeight: '800',
+  },
 });
