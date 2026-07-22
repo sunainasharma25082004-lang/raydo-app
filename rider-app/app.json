@@ -24,8 +24,16 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
-        "ACCESS_FINE_LOCATION"
-      ]
+        "ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyCM7PNM7qrecVBF7VGERs6SLS73kLLZfX8"
+        }
+      },
+      "package": "com.sharma_sunaina.RaydoApp"
     },
     "web": {
       "output": "static",
@@ -53,6 +61,12 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "081abd09-7e23-4c63-a070-308c42f1d5c8"
+      }
     }
   }
 }

@@ -24,13 +24,28 @@ app.use(cors());
 app.use(express.json());
 app.use(morgan('dev'));
 
-// Database Connection
-mongoose.connect(process.env.MONGO_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-})
-.then(() => console.log('MongoDB Connected Successfully'))
-.catch((err) => console.error('MongoDB Connection Error:', err));
+// Optional MongoDB — most Raydo flows use local JSON stores (data/*.json).
+// Atlas IP whitelist / network issues must NOT kill the API.
+if (process.env.MONGO_URI) {
+  mongoose
+    .connect(process.env.MONGO_URI, {
+      serverSelectionTimeoutMS: 8000,
+    })
+    .then(() => console.log('MongoDB Connected Successfully'))
+    .catch((err) => {
+      console.warn(
+        '[MongoDB] Optional connection failed — continuing with local JSON data store.',
+      );
+      console.warn(
+        `[MongoDB] ${err.message?.split('\n')[0] || err}`,
+      );
+      console.warn(
+        '[MongoDB] Tip: whitelist your IP in Atlas, or leave Mongo unused for local demo.',
+      );
+    });
+} else {
+  console.log('[MongoDB] MONGO_URI not set — using local JSON data only.');
+}
 
 // Socket.io integration
 require('./socket')(io);
@@ -55,8 +70,10 @@ app.get('/', (req, res) => {
   res.json({
     ok: true,
     message: 'Raydo API is running',
+    store: 'json',
     features: [
       'KYC + admin credentials',
+      'Rider list / search / block',
       'Live GPS location',
       'Live trip tracking',
       'Vehicle-type matching',
@@ -65,7 +82,16 @@ app.get('/', (req, res) => {
   });
 });
 
+// Helpful 404 for unknown API paths
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    message: `Route not found: ${req.method} ${req.originalUrl}`,
+    hint: 'Restart backend after pulling latest routes (e.g. GET /api/platform/admin/riders)',
+  });
+});
+
 const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server running on port ${PORT}`);
+  console.log('Admin riders: GET /api/platform/admin/riders');
 });

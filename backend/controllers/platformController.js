@@ -4,20 +4,35 @@ const driverStore = require('../store/driverStore');
 exports.createRide = (req, res) => {
   try {
     const ride = platform.createRide(req.body);
+    const group = ride.vehicleGroup || driverStore.vehicleGroup(ride.vehicleType);
     const matched = driverStore.listOnlineDriversByVehicle(ride.vehicleType);
     const io = req.app.get('io');
     if (io) {
+      // ONLY matching vehicle drivers (no global broadcast — avoids Auto seeing Scooty etc.)
       matched.forEach((d) => {
-        io.to(`driver:${d.id}`).emit('new_ride_request', { ride });
+        io.to(`driver:${d.id}`).emit('new_ride_request', {
+          ride,
+          vehicleGroup: group,
+        });
       });
-      io.emit('new_ride_request_filtered', {
+      // Room for drivers who joined their vehicle group (Scooty/Bike → two_wheeler)
+      io.to(`vehicle:${group}`).emit('new_ride_request', {
         ride,
-        vehicleGroup: ride.vehicleGroup,
+        vehicleGroup: group,
       });
     }
     res.status(201).json({
-      message: 'Ride requested with live pickup GPS',
+      message: 'Ride requested — only matching vehicle drivers notified',
       ride,
+      vehicleGroup: group,
+      matchRule:
+        group === 'two_wheeler'
+          ? 'Scooty/Bike drivers only'
+          : group === 'auto'
+            ? 'Auto drivers only'
+            : group === 'car'
+              ? 'Car drivers only'
+              : `${ride.vehicleType} only`,
       matchedDriversCount: matched.length,
       matchedDrivers: matched.map((d) => ({
         id: d.id,
@@ -149,7 +164,15 @@ exports.pushRiderLocation = (req, res) => {
 };
 
 exports.openRides = (req, res) => {
-  res.json({ rides: platform.openRidesForDriver(req.user.id) });
+  const driver = driverStore.findDriverById(req.user.id);
+  const rides = platform.openRidesForDriver(req.user.id);
+  res.json({
+    rides,
+    driverVehicle: driver?.vehicle?.type || null,
+    vehicleGroup: driverStore.vehicleGroup(driver?.vehicle?.type),
+    matchNote:
+      'Only rides matching your vehicle group are listed (Scooty/Bike share two-wheeler).',
+  });
 };
 
 exports.activeDriverRide = (req, res) => {
@@ -211,4 +234,46 @@ exports.adminStats = (req, res) => {
 
 exports.adminRides = (req, res) => {
   res.json({ rides: platform.listRides().slice(0, 100) });
+};
+
+exports.adminRiders = (req, res) => {
+  const filter = String(req.query.status || 'all').toLowerCase();
+  let riders = platform.listRidersAdmin();
+  if (filter === 'blocked') riders = riders.filter((r) => r.blocked);
+  if (filter === 'active') riders = riders.filter((r) => !r.blocked);
+  res.json({
+    riders,
+    stats: platform.riderAdminStats(),
+  });
+};
+
+exports.adminBlockRider = (req, res) => {
+  try {
+    const blocked = req.body.blocked !== false && req.body.blocked !== 'false';
+    const rider = platform.setRiderBlocked(
+      req.params.id,
+      blocked,
+      req.body.reason,
+      req.user?.username || 'admin',
+    );
+    res.json({
+      message: blocked ? 'Rider blocked' : 'Rider unblocked',
+      rider,
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ message: e.message });
+  }
+};
+
+exports.rateRide = (req, res) => {
+  try {
+    const ride = platform.rateRide(req.params.id, {
+      rating: req.body.rating,
+      comment: req.body.comment,
+      by: req.body.by || req.user?.role,
+    });
+    res.json({ message: 'Rating saved', ride });
+  } catch (e) {
+    res.status(e.status || 500).json({ message: e.message });
+  }
 };

@@ -13,10 +13,41 @@ module.exports = (io) => {
       console.log(`Rider room: rider:${riderId}`);
     });
 
-    socket.on('join_driver', (driverId) => {
+    socket.on('join_driver', (payload) => {
+      // payload: driverId string OR { driverId, vehicleType }
+      const driverId =
+        typeof payload === 'string' ? payload : payload?.driverId || payload?.id;
+      const vehicleType =
+        typeof payload === 'object' && payload
+          ? payload.vehicleType || payload.vehicle?.type
+          : null;
+
+      if (!driverId) return;
       socket.join(`driver:${driverId}`);
       socket.join(String(driverId));
-      console.log(`Driver room: driver:${driverId}`);
+
+      let group = vehicleType ? driverStore.vehicleGroup(vehicleType) : null;
+      if (!group) {
+        const d = driverStore.findDriverById(driverId);
+        if (d?.vehicle?.type) group = driverStore.vehicleGroup(d.vehicle.type);
+      }
+      if (group) {
+        socket.join(`vehicle:${group}`);
+        console.log(`Driver room: driver:${driverId} + vehicle:${group}`);
+      } else {
+        console.log(`Driver room: driver:${driverId}`);
+      }
+    });
+
+    // Explicit vehicle room (client can re-join after login)
+    socket.on('join_vehicle_group', (vehicleTypeOrGroup) => {
+      const g = String(vehicleTypeOrGroup || '');
+      const group = g.startsWith('two_') || g === 'auto' || g === 'car'
+        ? g
+        : driverStore.vehicleGroup(g);
+      if (!group || group === 'other') return;
+      socket.join(`vehicle:${group}`);
+      console.log(`Socket ${socket.id} joined vehicle:${group}`);
     });
 
     socket.on('join_ride', (rideId) => {

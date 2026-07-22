@@ -115,6 +115,205 @@ function saveRides(list) {
   write(RIDES_FILE, list);
 }
 
+function listStoredRiders() {
+  return read(RIDERS_FILE);
+}
+
+function saveStoredRiders(list) {
+  write(RIDERS_FILE, list);
+}
+
+function upsertRiderProfile({ id: riderId, name, phone }) {
+  if (!riderId) return null;
+  const list = listStoredRiders();
+  let rider = list.find((r) => r.id === riderId);
+  if (!rider) {
+    rider = {
+      id: riderId,
+      name: name || 'Rider',
+      phone: phone || '',
+      blocked: false,
+      blockReason: '',
+      blockedAt: null,
+      blockedBy: null,
+      createdAt: new Date().toISOString(),
+    };
+    list.push(rider);
+  } else {
+    if (name) rider.name = name;
+    if (phone) rider.phone = phone;
+  }
+  rider.updatedAt = new Date().toISOString();
+  saveStoredRiders(list);
+  return rider;
+}
+
+function getRiderRecord(riderId) {
+  return listStoredRiders().find((r) => r.id === riderId) || null;
+}
+
+function isRiderBlocked(riderId) {
+  const r = getRiderRecord(riderId);
+  return !!(r && r.blocked);
+}
+
+function setRiderBlocked(riderId, blocked, reason, adminUsername) {
+  if (!riderId) {
+    const err = new Error('Rider id required');
+    err.status = 400;
+    throw err;
+  }
+  const list = listStoredRiders();
+  let rider = list.find((r) => r.id === riderId);
+  if (!rider) {
+    // create from ride history if missing
+    const sample = listRides().find((r) => r.riderId === riderId);
+    rider = {
+      id: riderId,
+      name: sample?.riderName || 'Rider',
+      phone: sample?.riderPhone || '',
+      blocked: false,
+      blockReason: '',
+      blockedAt: null,
+      blockedBy: null,
+      createdAt: sample?.createdAt || new Date().toISOString(),
+    };
+    list.push(rider);
+  }
+  rider.blocked = !!blocked;
+  rider.blockReason = blocked ? String(reason || 'Blocked by admin') : '';
+  rider.blockedAt = blocked ? new Date().toISOString() : null;
+  rider.blockedBy = blocked ? adminUsername || 'admin' : null;
+  rider.updatedAt = new Date().toISOString();
+  saveStoredRiders(list);
+  return publicRider(rider);
+}
+
+function publicRider(rider) {
+  if (!rider) return null;
+  return {
+    id: rider.id,
+    name: rider.name || 'Rider',
+    phone: rider.phone || '',
+    blocked: !!rider.blocked,
+    blockReason: rider.blockReason || '',
+    blockedAt: rider.blockedAt || null,
+    blockedBy: rider.blockedBy || null,
+    createdAt: rider.createdAt,
+  };
+}
+
+/** Aggregate riders from stored profiles + ride history */
+function listRidersAdmin() {
+  const stored = listStoredRiders();
+  const rides = listRides();
+  const byId = new Map();
+
+  for (const r of stored) {
+    byId.set(r.id, { ...r });
+  }
+
+  for (const ride of rides) {
+    const rid = ride.riderId;
+    if (!rid) continue;
+    if (!byId.has(rid)) {
+      byId.set(rid, {
+        id: rid,
+        name: ride.riderName || 'Rider',
+        phone: ride.riderPhone || '',
+        blocked: false,
+        blockReason: '',
+        blockedAt: null,
+        blockedBy: null,
+        createdAt: ride.createdAt,
+      });
+    } else {
+      const cur = byId.get(rid);
+      if ((!cur.name || cur.name === 'Rider') && ride.riderName) cur.name = ride.riderName;
+      if (!cur.phone && ride.riderPhone) cur.phone = ride.riderPhone;
+    }
+  }
+
+  const riders = Array.from(byId.values()).map((rider) => {
+    const riderRides = rides.filter((r) => r.riderId === rider.id);
+    const completed = riderRides.filter((r) => r.status === 'Completed');
+    // Prefer riderRating (driver rates rider); fall back to rating on trip
+    const ratings = riderRides
+      .map((r) => (typeof r.riderRating === 'number' ? r.riderRating : r.rating))
+      .filter((n) => typeof n === 'number' && n >= 1 && n <= 5);
+    const goodReviews = ratings.filter((n) => n >= 4).length;
+    const badReviews = ratings.filter((n) => n <= 2).length;
+    const neutralReviews = ratings.filter((n) => n === 3).length;
+    const avgRating =
+      ratings.length > 0
+        ? Math.round((ratings.reduce((a, b) => a + b, 0) / ratings.length) * 10) / 10
+        : null;
+
+    return {
+      ...publicRider(rider),
+      totalRides: riderRides.length,
+      completedRides: completed.length,
+      cancelledRides: riderRides.filter((r) => r.status === 'Cancelled').length,
+      activeRides: riderRides.filter((r) =>
+        ['Requested', 'Accepted', 'Arrived', 'In_Progress'].includes(r.status),
+      ).length,
+      reviewCount: ratings.length,
+      goodReviews,
+      badReviews,
+      neutralReviews,
+      avgRating,
+      lastRideAt: riderRides[0]?.createdAt || null,
+    };
+  });
+
+  riders.sort((a, b) => {
+    if (a.blocked !== b.blocked) return a.blocked ? -1 : 1;
+    return String(b.lastRideAt || '').localeCompare(String(a.lastRideAt || ''));
+  });
+
+  return riders;
+}
+
+function riderAdminStats() {
+  const riders = listRidersAdmin();
+  return {
+    ridersTotal: riders.length,
+    ridersBlocked: riders.filter((r) => r.blocked).length,
+    ridesByRiders: riders.reduce((s, r) => s + r.totalRides, 0),
+    goodReviewsTotal: riders.reduce((s, r) => s + r.goodReviews, 0),
+    badReviewsTotal: riders.reduce((s, r) => s + r.badReviews, 0),
+    reviewsTotal: riders.reduce((s, r) => s + r.reviewCount, 0),
+  };
+}
+
+function rateRide(rideId, { rating, comment, by } = {}) {
+  const rides = listRides();
+  const ride = rides.find((r) => r.id === rideId);
+  if (!ride) {
+    const err = new Error('Ride not found');
+    err.status = 404;
+    throw err;
+  }
+  const stars = Number(rating);
+  if (!stars || stars < 1 || stars > 5) {
+    const err = new Error('rating must be 1–5');
+    err.status = 400;
+    throw err;
+  }
+  // by === 'driver' → rates the rider; otherwise rider rates driver/trip
+  if (by === 'driver') {
+    ride.riderRating = stars;
+    ride.riderRatingComment = comment || '';
+    ride.riderRatedAt = new Date().toISOString();
+  } else {
+    ride.rating = stars;
+    ride.ratingComment = comment || '';
+    ride.ratedAt = new Date().toISOString();
+  }
+  saveRides(rides);
+  return ride;
+}
+
 function createRide({
   riderId,
   riderName,
@@ -140,10 +339,28 @@ function createRide({
     throw err;
   }
 
+  const resolvedRiderId = riderId || id();
+  if (isRiderBlocked(resolvedRiderId)) {
+    const rec = getRiderRecord(resolvedRiderId);
+    const err = new Error(
+      rec?.blockReason
+        ? `Account blocked: ${rec.blockReason}`
+        : 'Your account is blocked. Contact Raydo support.',
+    );
+    err.status = 403;
+    throw err;
+  }
+
+  upsertRiderProfile({
+    id: resolvedRiderId,
+    name: riderName || 'Rider',
+    phone: riderPhone || '',
+  });
+
   const rides = listRides();
   const ride = {
     id: id(),
-    riderId: riderId || id(),
+    riderId: resolvedRiderId,
     riderName: riderName || 'Rider',
     riderPhone: riderPhone || '',
     pickup: pickup || 'Current location',
@@ -162,6 +379,8 @@ function createRide({
     driverLocation: null,
     riderLocation: { lat: Number(pickupLat), lng: Number(pickupLng), updatedAt: new Date().toISOString() },
     otp: String(Math.floor(1000 + Math.random() * 9000)),
+    rating: null,
+    riderRating: null,
     createdAt: new Date().toISOString(),
     acceptedAt: null,
     completedAt: null,
@@ -205,8 +424,10 @@ function acceptRide(rideId, driverId) {
     throw err;
   }
   if (!driverStore.vehicleMatches(driver.vehicle?.type, ride.vehicleType)) {
+    const want = driverStore.vehicleGroup(ride.vehicleType);
+    const have = driverStore.vehicleGroup(driver.vehicle?.type);
     const err = new Error(
-      `Vehicle mismatch: rider wants ${ride.vehicleType}, you drive ${driver.vehicle?.type}`,
+      `Vehicle mismatch: rider requested ${ride.vehicleType} (${want}), you drive ${driver.vehicle?.type} (${have}). Only same type can accept.`,
     );
     err.status = 400;
     throw err;
@@ -302,11 +523,14 @@ function updateRideRiderLocation(rideId, lat, lng) {
 function openRidesForDriver(driverId) {
   const driver = driverStore.findDriverById(driverId);
   if (!driver || driver.kycStatus !== 'approved') return [];
-  return listRides().filter(
-    (r) =>
-      r.status === 'Requested' &&
-      driverStore.vehicleMatches(driver.vehicle?.type, r.vehicleType),
-  );
+  const driverType = driver.vehicle?.type;
+  if (!driverType) return [];
+  return listRides().filter((r) => {
+    if (r.status !== 'Requested') return false;
+    if (r.driverId) return false;
+    // Strict: Scooty/Bike ↔ two_wheeler only; Auto ↔ auto; Car ↔ car
+    return driverStore.vehicleMatches(driverType, r.vehicleType);
+  });
 }
 
 function activeRideForDriver(driverId) {
@@ -479,14 +703,17 @@ function adminStats() {
   const kyc = driverStore.getKycStats();
   const rides = listRides();
   const w = listWithdrawals();
+  const riderStats = riderAdminStats();
   return {
     ...kyc,
     ridesTotal: rides.length,
     ridesActive: rides.filter((r) =>
       ['Requested', 'Accepted', 'Arrived', 'In_Progress'].includes(r.status),
     ).length,
+    ridesCompleted: rides.filter((r) => r.status === 'Completed').length,
     withdrawalsPending: w.filter((x) => x.status === 'pending_admin').length,
     weeklyWithdrawOpen: getSettings().weeklyWithdrawOpen,
+    ...riderStats,
   };
 }
 
@@ -512,4 +739,11 @@ module.exports = {
   driverWallet,
   adminStats,
   estimateFare,
+  listRidersAdmin,
+  setRiderBlocked,
+  isRiderBlocked,
+  getRiderRecord,
+  rateRide,
+  riderAdminStats,
+  upsertRiderProfile,
 };

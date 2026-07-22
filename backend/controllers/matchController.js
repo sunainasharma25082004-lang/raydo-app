@@ -18,17 +18,14 @@ exports.requestRide = (req, res) => {
       distanceKm,
     });
 
-    // Notify only matching vehicle group
+    // Notify ONLY matching vehicle group — never global broadcast
+    const group = store.vehicleGroup(vehicleType);
     const io = req.app.get('io');
     if (io) {
       matchedDrivers.forEach((d) => {
-        io.to(`driver:${d.id}`).emit('new_ride_request', { ride });
+        io.to(`driver:${d.id}`).emit('new_ride_request', { ride, vehicleGroup: group });
       });
-      // Also broadcast with filter payload for clients listening generally
-      io.emit('new_ride_request_filtered', {
-        ride,
-        vehicleGroup: store.vehicleGroup(vehicleType),
-      });
+      io.to(`vehicle:${group}`).emit('new_ride_request', { ride, vehicleGroup: group });
     }
 
     res.status(201).json({

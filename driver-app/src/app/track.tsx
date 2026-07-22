@@ -7,7 +7,7 @@ import { Navigation, Phone, Send } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
 
 const { width } = Dimensions.get('window');
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.31.254:5000';
 
 export default function DriverTrackScreen() {
   const [isTracking, setIsTracking] = useState(false);
@@ -48,8 +48,8 @@ export default function DriverTrackScreen() {
     let { status } = await Location.requestForegroundPermissionsAsync();
     if (status !== 'granted') {
       Alert.alert(
-        'Permission needed',
-        'Allow location so your actual GPS can be shared with the rider.',
+        'Permission Denied',
+        'Please go to your phone Settings -> Apps -> Expo Go -> Permissions and allow Location access.',
         [
           { text: 'Open settings', onPress: () => Linking.openSettings() },
           { text: 'Cancel', style: 'cancel' },

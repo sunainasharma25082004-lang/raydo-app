@@ -27,9 +27,14 @@ router.get('/driver/active-ride', auth, requireDriver, c.activeDriverRide);
 router.get('/driver/wallet', auth, requireDriver, c.wallet);
 router.post('/driver/withdraw', auth, requireDriver, c.requestWithdraw);
 
+// Ratings (rider or driver)
+router.post('/rides/:id/rate', c.rateRide);
+
 // Admin
 router.get('/admin/stats', auth, requireAdmin, c.adminStats);
 router.get('/admin/rides', auth, requireAdmin, c.adminRides);
+router.get('/admin/riders', auth, requireAdmin, c.adminRiders);
+router.post('/admin/riders/:id/block', auth, requireAdmin, c.adminBlockRider);
 router.get('/admin/withdrawals', auth, requireAdmin, c.adminWithdrawals);
 router.post('/admin/withdrawals/:id/decide', auth, requireAdmin, c.adminDecideWithdraw);
 router.post('/admin/weekly-withdraw', auth, requireAdmin, c.adminWeeklyWindow);

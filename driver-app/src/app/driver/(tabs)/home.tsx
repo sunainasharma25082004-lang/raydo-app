@@ -8,12 +8,20 @@ import { OnlineToggle } from '@/components/driver/OnlineToggle';
 import { StatPill } from '@/components/driver/StatPill';
 import { Button } from '@/components/ui/Button';
 import { useDriver } from '@/context/DriverContext';
-import { formatInr } from '@/data/mock';
+import { formatInr, vehiclesMatch } from '@/data/mock';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 import { useCurrentLocation } from '@/hooks/use-current-location';
 import { useLiveLocationSync } from '@/hooks/use-live-location-sync';
 import { useSession } from '@/context/SessionContext';
 import { api, LiveRide } from '@/lib/api';
+
+function pickMatchingRide(rides: LiveRide[] | undefined, driverVehicle?: string | null) {
+  if (!rides?.length) return null;
+  const matched = rides.filter((r) =>
+    driverVehicle ? vehiclesMatch(driverVehicle, r.vehicleType) : true,
+  );
+  return matched[0] || null;
+}
 
 export default function DriverHomeScreen() {
   const router = useRouter();
@@ -26,7 +34,8 @@ export default function DriverHomeScreen() {
     todayTrips,
     simulateIncoming,
   } = useDriver();
-  const { token } = useSession();
+  const { token, driver: sessionDriver } = useSession();
+  const myVehicle = sessionDriver?.vehicle?.type || driver.vehicleCategory;
   const { coords, address, loading: locLoading, error: locError, refresh: refreshLocation } =
     useCurrentLocation({ watch: true, highAccuracy: true });
   const lastNavStatus = useRef<string | null>(null);
@@ -52,18 +61,21 @@ export default function DriverHomeScreen() {
     }
   }, [tripStatus, router]);
 
-  // Auto-check server for real rider requests while online
+  // Auto-check server for real rider requests while online (same vehicle only)
   useEffect(() => {
     if (!isOnline || !token || tripStatus !== 'idle') return;
     let cancelled = false;
+    let shownId: string | null = null;
     const check = async () => {
       try {
         const res = await api.openRides(token);
-        if (cancelled || !res.rides?.length) return;
-        const r: LiveRide = res.rides[0];
+        if (cancelled) return;
+        const r = pickMatchingRide(res.rides, myVehicle);
+        if (!r || r.id === shownId) return;
+        shownId = r.id;
         Alert.alert(
-          'Live ride request',
-          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}`,
+          `Live ${r.vehicleType} request`,
+          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}\n(Matched to your ${myVehicle})`,
           [
             { text: 'Later', style: 'cancel' },
             {
@@ -71,10 +83,10 @@ export default function DriverHomeScreen() {
               onPress: async () => {
                 try {
                   await api.acceptRide(token, r.id);
-                  // Jump to trip — GPS stream continues for rider map
                   router.push('/driver/trip');
                 } catch (e: any) {
                   Alert.alert('Accept failed', e.message);
+                  shownId = null;
                 }
               },
             },
@@ -90,7 +102,7 @@ export default function DriverHomeScreen() {
       cancelled = true;
       clearInterval(t);
     };
-  }, [isOnline, token, tripStatus, router]);
+  }, [isOnline, token, tripStatus, router, myVehicle]);
 
   const busy = tripStatus !== 'idle' && tripStatus !== 'incoming';
 
@@ -123,16 +135,15 @@ export default function DriverHomeScreen() {
   const fetchOpenRides = async () => {
     if (!token) {
       Alert.alert('Login required', 'Sign in with driver credentials for real rides.');
-      simulateIncoming();
       return;
     }
     try {
       const res = await api.openRides(token);
-      if (res.rides?.length) {
-        const r: LiveRide = res.rides[0];
+      const r = pickMatchingRide(res.rides, myVehicle);
+      if (r) {
         Alert.alert(
-          'Nearby ride',
-          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}`,
+          `Nearby ${r.vehicleType}`,
+          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}\nYour vehicle: ${myVehicle}`,
           [
             { text: 'Ignore', style: 'cancel' },
             {
@@ -150,8 +161,8 @@ export default function DriverHomeScreen() {
         );
       } else {
         Alert.alert(
-          'No open rides',
-          'No matching requests right now. Ask the rider to book first (same vehicle type).',
+          'No matching rides',
+          `No open ${myVehicle === 'Scooty' || myVehicle === 'Bike' ? 'two-wheeler (Scooty/Bike)' : myVehicle} requests right now.\n\nRiders who book other vehicle types will not appear here.`,
         );
       }
     } catch (e: any) {
@@ -232,8 +243,12 @@ export default function DriverHomeScreen() {
             {coords
               ? `Live GPS active${coords.accuracy != null ? ` (±${Math.round(coords.accuracy)}m)` : ''}. ${
                   isOnline
-                    ? 'You are visible for nearby matching.'
-                    : 'Go online to receive requests near this point.'
+                    ? `Only ${
+                        myVehicle === 'Scooty' || myVehicle === 'Bike'
+                          ? 'Scooty / Bike (two-wheeler)'
+                          : myVehicle
+                      } requests will come to you — not other vehicles.`
+                    : 'Go online to receive matching vehicle requests near you.'
                 }`
               : locLoading
                 ? 'Requesting location permission and GPS fix…'

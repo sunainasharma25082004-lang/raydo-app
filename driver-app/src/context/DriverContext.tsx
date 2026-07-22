@@ -128,8 +128,9 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      // Schedule a demo request only when idle
-      if (tripStatusRef.current === 'idle') {
+      // Real logged-in drivers: NO fake demo requests (only server open-rides of same vehicle).
+      // Demo mock only when offline login / no token.
+      if (!token && tripStatusRef.current === 'idle') {
         autoRequestTimer.current = setTimeout(() => {
           if (!isOnlineRef.current || tripStatusRef.current !== 'idle') return;
           const req = pickRandomRequest(vehicleCategoryRef.current);
@@ -144,12 +145,14 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
 
   const simulateIncoming = useCallback(() => {
     if (!isOnlineRef.current || tripStatusRef.current !== 'idle') return;
+    // Logged-in: never inject fake cross-vehicle junk
+    if (token) return;
     clearAutoTimer();
     const req = pickRandomRequest(vehicleCategoryRef.current);
     if (!req) return;
     setActiveRequest(req);
     setTripStatus('incoming');
-  }, [clearAutoTimer]);
+  }, [clearAutoTimer, token]);
 
   const acceptRequest = useCallback(() => {
     if (!activeRequestRef.current) return;

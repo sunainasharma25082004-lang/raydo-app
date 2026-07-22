@@ -5,7 +5,7 @@ import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
+const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.31.254:5000';
 
 export default function RequestsScreen() {
   const router = useRouter();

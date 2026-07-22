@@ -35,7 +35,14 @@ export function useLiveLocationSync(opts: {
         reconnection: true,
       });
       socketRef.current = socket;
-      socket.emit('join_driver', driver.id);
+      // Join driver room + vehicle group so only matching ride requests are received
+      socket.emit('join_driver', {
+        driverId: driver.id,
+        vehicleType: driver.vehicle?.type,
+      });
+      if (driver.vehicle?.type) {
+        socket.emit('join_vehicle_group', driver.vehicle.type);
+      }
       if (opts.rideId) socket.emit('join_ride', opts.rideId);
 
       const push = async (lat: number, lng: number) => {

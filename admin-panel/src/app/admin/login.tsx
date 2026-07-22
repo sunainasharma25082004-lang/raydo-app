@@ -8,8 +8,10 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
+import { Shield, Lock, User } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { adminApi } from '@/lib/api';
 
@@ -42,87 +44,185 @@ export default function AdminLoginScreen() {
   };
 
   return (
-    <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-    >
-      <View style={styles.card}>
-        <Text style={styles.title}>Raydo Admin</Text>
-        <Text style={styles.sub}>Approve driver KYC · issue login credentials</Text>
-
-        <Text style={styles.label}>Username</Text>
-        <TextInput
-          style={styles.input}
-          value={username}
-          onChangeText={setUsername}
-          autoCapitalize="none"
-          placeholder="admin"
-          placeholderTextColor={Colors.textLight}
-        />
-
-        <Text style={styles.label}>Password</Text>
-        <TextInput
-          style={styles.input}
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-          placeholder="••••••••"
-          placeholderTextColor={Colors.textLight}
-        />
-
-        {error ? <Text style={styles.error}>{error}</Text> : null}
-
-        <TouchableOpacity style={styles.btn} onPress={onLogin} disabled={loading}>
-          {loading ? (
-            <ActivityIndicator color="#fff" />
-          ) : (
-            <Text style={styles.btnText}>Login</Text>
-          )}
-        </TouchableOpacity>
-
-        <Text style={styles.hint}>Default: admin / admin123</Text>
+    <View style={styles.root}>
+      <View style={styles.hero}>
+        <View style={styles.logoRing}>
+          <Shield color={Colors.accent} size={36} strokeWidth={2.2} />
+        </View>
+        <Text style={styles.brand}>RAYDO</Text>
+        <Text style={styles.brandSub}>Admin Control Center</Text>
       </View>
-    </KeyboardAvoidingView>
+
+      <KeyboardAvoidingView
+        style={styles.flex}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <ScrollView
+          contentContainerStyle={styles.scroll}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.card}>
+            <Text style={styles.title}>Welcome back</Text>
+            <Text style={styles.sub}>Sign in to manage KYC, riders & payouts</Text>
+
+            <Text style={styles.label}>Username</Text>
+            <View style={styles.inputWrap}>
+              <User color={Colors.textLight} size={18} />
+              <TextInput
+                style={styles.input}
+                value={username}
+                onChangeText={setUsername}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="admin"
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
+
+            <Text style={styles.label}>Password</Text>
+            <View style={styles.inputWrap}>
+              <Lock color={Colors.textLight} size={18} />
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry
+                placeholder="••••••••"
+                placeholderTextColor={Colors.textLight}
+              />
+            </View>
+
+            {error ? (
+              <View style={styles.errorBox}>
+                <Text style={styles.error}>{error}</Text>
+              </View>
+            ) : null}
+
+            <TouchableOpacity
+              style={[styles.btn, loading && styles.btnDisabled]}
+              onPress={onLogin}
+              disabled={loading}
+              activeOpacity={0.85}
+            >
+              {loading ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <Text style={styles.btnText}>Sign in to dashboard</Text>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.hint}>Demo · admin / admin123</Text>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: Colors.background,
+  root: { flex: 1, backgroundColor: Colors.primary },
+  flex: { flex: 1 },
+  hero: {
+    paddingTop: Platform.OS === 'web' ? 56 : 64,
+    paddingBottom: 36,
+    alignItems: 'center',
+  },
+  logoRing: {
+    width: 72,
+    height: 72,
+    borderRadius: 22,
+    backgroundColor: 'rgba(201,162,93,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(201,162,93,0.4)',
+    alignItems: 'center',
     justifyContent: 'center',
-    padding: 24,
+    marginBottom: 18,
+  },
+  brand: {
+    fontSize: 30,
+    fontWeight: '900',
+    color: Colors.white,
+    letterSpacing: 5,
+  },
+  brandSub: {
+    marginTop: 8,
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.62)',
+    fontWeight: '600',
+    letterSpacing: 0.3,
+  },
+  scroll: {
+    flexGrow: 1,
+    paddingHorizontal: 22,
+    paddingBottom: 48,
   },
   card: {
     backgroundColor: Colors.white,
-    borderRadius: 20,
-    padding: 24,
+    borderRadius: 22,
+    paddingVertical: 28,
+    paddingHorizontal: 24,
     shadowColor: '#000',
-    shadowOpacity: 0.06,
-    shadowRadius: 12,
-    elevation: 3,
+    shadowOpacity: 0.14,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 6,
   },
-  title: { fontSize: 26, fontWeight: '800', color: Colors.primary },
-  sub: { fontSize: 14, color: Colors.textLight, marginTop: 6, marginBottom: 20 },
-  label: { fontSize: 13, fontWeight: '600', color: Colors.textLight, marginBottom: 6 },
-  input: {
-    borderWidth: 1,
-    borderColor: '#E5E8EB',
-    borderRadius: 12,
+  title: { fontSize: 22, fontWeight: '800', color: Colors.text, letterSpacing: -0.2 },
+  sub: {
+    fontSize: 14,
+    color: Colors.textLight,
+    marginTop: 8,
+    marginBottom: 26,
+    lineHeight: 20,
+  },
+  label: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textLight,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  inputWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 1.5,
+    borderColor: '#E8E4DC',
+    backgroundColor: '#FAF8F4',
+    borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  input: {
+    flex: 1,
+    paddingVertical: 14,
     fontSize: 16,
     color: Colors.text,
-    marginBottom: 14,
+    fontWeight: '600',
   },
   btn: {
     backgroundColor: Colors.primary,
-    borderRadius: 14,
+    borderRadius: 16,
     paddingVertical: 16,
     alignItems: 'center',
     marginTop: 4,
   },
-  btnText: { color: '#fff', fontWeight: '700', fontSize: 16 },
-  error: { color: Colors.error, marginBottom: 8, fontWeight: '600' },
-  hint: { textAlign: 'center', marginTop: 14, color: Colors.textLight, fontSize: 12 },
+  btnDisabled: { opacity: 0.7 },
+  btnText: { color: '#fff', fontWeight: '800', fontSize: 16 },
+  errorBox: {
+    backgroundColor: '#FDECEA',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 12,
+  },
+  error: { color: Colors.error, fontWeight: '700', fontSize: 13 },
+  hint: {
+    textAlign: 'center',
+    marginTop: 16,
+    color: Colors.textLight,
+    fontSize: 12,
+    fontWeight: '600',
+  },
 });

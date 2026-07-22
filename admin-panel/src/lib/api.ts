@@ -1,10 +1,17 @@
 import { Platform } from 'react-native';
 
-const LAN_FALLBACK = 'http://10.13.207.55:5000';
+/**
+ * Your PC Wi‑Fi IP (phone must be on same Wi‑Fi).
+ * Update this if `ipconfig` shows a different address.
+ */
+export const DEV_LAN_IP = '192.168.31.254';
+export const API_PORT = 5000;
 
 export const API_BASE =
   process.env.EXPO_PUBLIC_API_URL ||
-  (Platform.OS === 'web' ? 'http://localhost:5000' : LAN_FALLBACK);
+  (Platform.OS === 'web'
+    ? `http://localhost:${API_PORT}`
+    : `http://${DEV_LAN_IP}:${API_PORT}`);
 
 async function request<T>(
   path: string,
@@ -46,6 +53,27 @@ export type AdminDriver = {
   };
   documents: Record<string, string | undefined>;
   approvedAt?: string;
+};
+
+export type AdminRider = {
+  id: string;
+  name: string;
+  phone: string;
+  blocked: boolean;
+  blockReason?: string;
+  blockedAt?: string | null;
+  blockedBy?: string | null;
+  totalRides: number;
+  completedRides: number;
+  cancelledRides: number;
+  activeRides: number;
+  reviewCount: number;
+  goodReviews: number;
+  badReviews: number;
+  neutralReviews: number;
+  avgRating: number | null;
+  lastRideAt?: string | null;
+  createdAt?: string;
 };
 
 export const adminApi = {
@@ -99,5 +127,18 @@ export const adminApi = {
       method: 'POST',
       token,
       body: JSON.stringify({ open, note }),
+    }),
+
+  riders: (token: string, status: 'all' | 'active' | 'blocked' = 'all') =>
+    request<{ riders: AdminRider[]; stats: Record<string, number> }>(
+      `/api/platform/admin/riders?status=${status}`,
+      { token },
+    ),
+
+  blockRider: (token: string, id: string, blocked: boolean, reason?: string) =>
+    request<{ message: string; rider: AdminRider }>(`/api/platform/admin/riders/${id}/block`, {
+      method: 'POST',
+      token,
+      body: JSON.stringify({ blocked, reason }),
     }),
 };
