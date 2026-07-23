@@ -8,7 +8,8 @@ import { Colors } from '@/constants/Colors';
 import { MapPin, Navigation, Phone, Send } from 'lucide-react-native';
 
 const { width, height } = Dimensions.get('window');
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.31.254:5000';
+const API_URL =
+  process.env.EXPO_PUBLIC_API_URL || 'https://raydo-app-tqev.onrender.com';
 
 export default function TrackScreen() {
   const [location, setLocation] = useState<Location.LocationObject | null>(null);

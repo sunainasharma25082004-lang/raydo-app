@@ -1,17 +1,8 @@
-import { Platform } from 'react-native';
-
 /**
- * Your PC Wi‑Fi IP (phone must be on same Wi‑Fi).
- * Update this if `ipconfig` shows a different address.
+ * Production API (Render). Override with EXPO_PUBLIC_API_URL for local backend.
+ * Example local: EXPO_PUBLIC_API_URL=http://192.168.31.254:5000
  */
-export const DEV_LAN_IP = '192.168.31.254';
-export const API_PORT = 5000;
-
 export const API_BASE =
-  process.env.EXPO_PUBLIC_API_URL ||
-  (Platform.OS === 'android'
-    ? // Physical device needs LAN IP; emulator can use 10.0.2.2
-      `http://${DEV_LAN_IP}:${API_PORT}`
-    : `http://${DEV_LAN_IP}:${API_PORT}`);
+  process.env.EXPO_PUBLIC_API_URL || 'https://raydo-app-tqev.onrender.com';
 
 export const SOCKET_URL = API_BASE;

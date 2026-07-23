@@ -1,10 +1,26 @@
-import React, { useState, useRef } from 'react';
-import { View, Text, StyleSheet, Dimensions, TouchableOpacity, Image } from 'react-native';
+import React, { useEffect, useState, useRef } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  Dimensions,
+  TouchableOpacity,
+  Image,
+  ActivityIndicator,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { ChevronRight, Route } from 'lucide-react-native';
-import Animated, { useSharedValue, useAnimatedStyle, interpolate, Extrapolation, useAnimatedScrollHandler, type SharedValue } from 'react-native-reanimated';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  interpolate,
+  Extrapolation,
+  useAnimatedScrollHandler,
+  type SharedValue,
+} from 'react-native-reanimated';
 import { StatusBar } from 'expo-status-bar';
+import { getRiderSession, markOnboardingDone } from '@/lib/session';
 
 const { width, height } = Dimensions.get('window');
 
@@ -13,20 +29,24 @@ const SLIDES = [
     id: '1',
     title: 'Your Calm Commute',
     subtitle: 'Experience reliability without the noise. Book a ride in seconds.',
-    image: 'https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?auto=format&fit=crop&q=80',
+    image:
+      'https://images.unsplash.com/photo-1449965408869-eaa3f722e40d?auto=format&fit=crop&q=80',
   },
   {
     id: '2',
     title: 'Choose Your Comfort',
-    subtitle: 'From quick Bikes to spacious Autos and E-Rickshaws, tailored for your journey.',
-    image: 'https://images.unsplash.com/photo-1558227361-9c60e1d054d5?auto=format&fit=crop&q=80',
+    subtitle:
+      'From quick Bikes to spacious Autos and E-Rickshaws, tailored for your journey.',
+    image:
+      'https://images.unsplash.com/photo-1558227361-9c60e1d054d5?auto=format&fit=crop&q=80',
   },
   {
     id: '3',
     title: 'Safe & Secure',
     subtitle: 'Real-time tracking and verified drivers ensure you always arrive safely.',
-    image: 'https://images.unsplash.com/photo-1494587416117-f102a2ac0a8d?auto=format&fit=crop&q=80',
-  }
+    image:
+      'https://images.unsplash.com/photo-1494587416117-f102a2ac0a8d?auto=format&fit=crop&q=80',
+  },
 ];
 
 function PaginationDot({
@@ -41,13 +61,13 @@ function PaginationDot({
       scrollX.value,
       [(index - 1) * width, index * width, (index + 1) * width],
       [0.3, 1, 0.3],
-      Extrapolation.CLAMP
+      Extrapolation.CLAMP,
     );
     const widthAnim = interpolate(
       scrollX.value,
       [(index - 1) * width, index * width, (index + 1) * width],
       [8, 20, 8],
-      Extrapolation.CLAMP
+      Extrapolation.CLAMP,
     );
     return { opacity, width: widthAnim };
   });
@@ -57,9 +77,37 @@ function PaginationDot({
 
 export default function OnboardingScreen() {
   const router = useRouter();
+  const [booting, setBooting] = useState(true);
   const [currentIndex, setCurrentIndex] = useState(0);
   const scrollX = useSharedValue(0);
   const scrollRef = useRef<Animated.ScrollView>(null);
+
+  // If user already logged in (or finished onboarding), skip slides.
+  // This also fixes MIUI: location Allow restarts the app → restore session.
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const session = await getRiderSession();
+        if (!alive) return;
+        if (session.loggedIn) {
+          router.replace('/(tabs)/home');
+          return;
+        }
+        if (session.onboardingDone) {
+          router.replace('/rider/login');
+          return;
+        }
+      } catch {
+        /* show onboarding */
+      } finally {
+        if (alive) setBooting(false);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [router]);
 
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
@@ -67,11 +115,12 @@ export default function OnboardingScreen() {
     },
   });
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (currentIndex < SLIDES.length - 1) {
       scrollRef.current?.scrollTo({ x: width * (currentIndex + 1), animated: true });
       setCurrentIndex(currentIndex + 1);
     } else {
+      await markOnboardingDone();
       router.replace('/rider/login');
     }
   };
@@ -81,14 +130,22 @@ export default function OnboardingScreen() {
     setCurrentIndex(newIndex);
   };
 
+  if (booting) {
+    return (
+      <View style={[styles.container, styles.boot]}>
+        <StatusBar style="light" />
+        <ActivityIndicator size="large" color={Colors.accent} />
+        <Text style={styles.bootText}>Raydo</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <StatusBar style="light" />
-      
-      {/* Background with subtle gradient feel */}
+
       <View style={styles.bgOverlay} />
 
-      {/* Brand Header */}
       <View style={styles.header}>
         <Route color={Colors.accent} size={28} strokeWidth={1.5} style={{ marginRight: 8 }} />
         <Text style={styles.logoText}>Raydo</Text>
@@ -104,24 +161,21 @@ export default function OnboardingScreen() {
         onMomentumScrollEnd={handleMomentumScrollEnd}
         style={styles.scrollView}
       >
-        {SLIDES.map((slide, index) => {
-          return (
-            <View key={slide.id} style={styles.slide}>
-              <View style={styles.imageContainer}>
-                <Image source={{ uri: slide.image }} style={styles.image} />
-                <View style={styles.imageOverlay} />
-              </View>
-              
-              <View style={styles.textContainer}>
-                <Text style={styles.title}>{slide.title}</Text>
-                <Text style={styles.subtitle}>{slide.subtitle}</Text>
-              </View>
+        {SLIDES.map((slide) => (
+          <View key={slide.id} style={styles.slide}>
+            <View style={styles.imageContainer}>
+              <Image source={{ uri: slide.image }} style={styles.image} />
+              <View style={styles.imageOverlay} />
             </View>
-          );
-        })}
+
+            <View style={styles.textContainer}>
+              <Text style={styles.title}>{slide.title}</Text>
+              <Text style={styles.subtitle}>{slide.subtitle}</Text>
+            </View>
+          </View>
+        ))}
       </Animated.ScrollView>
 
-      {/* Footer controls */}
       <View style={styles.footer}>
         <View style={styles.pagination}>
           {SLIDES.map((_, index) => (
@@ -129,8 +183,8 @@ export default function OnboardingScreen() {
           ))}
         </View>
 
-        <TouchableOpacity 
-          style={[styles.button, currentIndex === SLIDES.length - 1 && styles.buttonSolid]} 
+        <TouchableOpacity
+          style={[styles.button, currentIndex === SLIDES.length - 1 && styles.buttonSolid]}
           onPress={handleNext}
           activeOpacity={0.8}
         >
@@ -153,6 +207,17 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: Colors.primary,
   },
+  boot: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  bootText: {
+    color: Colors.accent,
+    fontSize: 22,
+    fontWeight: '700',
+    letterSpacing: 2,
+  },
   bgOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: Colors.primary,
@@ -167,7 +232,7 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   logoText: {
-    fontFamily: 'System', // Will use Inter/San-Francisco natively
+    fontFamily: 'System',
     fontSize: 24,
     fontWeight: '300',
     letterSpacing: 2,
@@ -263,5 +328,5 @@ const styles = StyleSheet.create({
     color: Colors.primary,
     fontSize: 16,
     fontWeight: '600',
-  }
+  },
 });

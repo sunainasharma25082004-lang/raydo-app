@@ -24,6 +24,7 @@ import {
   Shield,
   Star,
 } from 'lucide-react-native';
+import { clearRiderLogin } from '@/lib/session';
 
 const RIDE_HISTORY = [
   { id: '1', destination: 'Phoenix Marketcity', date: 'Jul 15, 14:30', fare: '₹205', vehicle: 'Auto' },
@@ -176,7 +177,10 @@ export default function ProfileScreen() {
               {
                 text: 'Log Out',
                 style: 'destructive',
-                onPress: () => router.replace('/rider/login'),
+                onPress: async () => {
+                  await clearRiderLogin();
+                  router.replace('/rider/login');
+                },
               },
             ])
           }

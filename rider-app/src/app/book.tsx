@@ -5,7 +5,8 @@ import { Colors } from '@/constants/Colors';
 import axios from 'axios';
 import { io, Socket } from 'socket.io-client';
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.31.254:5000';
+const API_URL =
+  process.env.EXPO_PUBLIC_API_URL || 'https://raydo-app-tqev.onrender.com';
 
 export default function BookScreen() {
   const router = useRouter();

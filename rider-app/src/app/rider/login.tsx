@@ -8,11 +8,18 @@ import {
   KeyboardAvoidingView,
   Platform,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 import { ArrowRight, Phone, ShieldCheck, Sparkles } from 'lucide-react-native';
+import { saveRiderLogin } from '@/lib/session';
+import { askLocationPermission } from '@/hooks/use-current-location';
+
+function wait(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -20,15 +27,37 @@ export default function LoginScreen() {
   const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState('');
   const [step, setStep] = useState<'PHONE' | 'OTP'>('PHONE');
+  const [submitting, setSubmitting] = useState(false);
 
   const canContinue =
     step === 'PHONE' ? phone.replace(/\D/g, '').length === 10 : otp.length === 4;
 
-  const handleNext = () => {
+  const handleNext = async () => {
     if (step === 'PHONE' && canContinue) {
       setStep('OTP');
-    } else if (step === 'OTP' && canContinue) {
-      router.replace('/(tabs)/home');
+      return;
+    }
+    if (step === 'OTP' && canContinue && !submitting) {
+      setSubmitting(true);
+      try {
+        // 1) Save session first — if app restarts, user returns to home
+        await saveRiderLogin(phone);
+
+        // 2) Ask location HERE (login screen — no MapView).
+        //    Asking on home while MapView mounts is what kills the app on MIUI.
+        try {
+          await askLocationPermission();
+        } catch {
+          /* optional — home still works without GPS */
+        }
+
+        // 3) Let Android finish permission Activity before we mount the map
+        await wait(450);
+
+        router.replace('/(tabs)/home');
+      } finally {
+        setSubmitting(false);
+      }
     }
   };
 
@@ -102,15 +131,24 @@ export default function LoginScreen() {
           </View>
 
           <TouchableOpacity
-            style={[styles.button, canContinue ? styles.buttonActive : styles.buttonDisabled]}
+            style={[
+              styles.button,
+              canContinue && !submitting ? styles.buttonActive : styles.buttonDisabled,
+            ]}
             onPress={handleNext}
-            disabled={!canContinue}
+            disabled={!canContinue || submitting}
             activeOpacity={0.9}
           >
-            <Text style={styles.buttonText}>
-              {step === 'PHONE' ? 'Send OTP' : 'Verify & continue'}
-            </Text>
-            <ArrowRight color={canContinue ? Colors.accent : Colors.textLight} size={18} />
+            {submitting ? (
+              <ActivityIndicator color={Colors.accent} />
+            ) : (
+              <>
+                <Text style={styles.buttonText}>
+                  {step === 'PHONE' ? 'Send OTP' : 'Verify & continue'}
+                </Text>
+                <ArrowRight color={canContinue ? Colors.accent : Colors.textLight} size={18} />
+              </>
+            )}
           </TouchableOpacity>
 
           {step === 'OTP' ? (

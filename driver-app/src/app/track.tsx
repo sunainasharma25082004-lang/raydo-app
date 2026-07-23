@@ -7,7 +7,8 @@ import { Navigation, Phone, Send } from 'lucide-react-native';
 import { StatusBar } from 'expo-status-bar';
 
 const { width } = Dimensions.get('window');
-const API_URL = process.env.EXPO_PUBLIC_API_URL || 'http://192.168.31.254:5000';
+const API_URL =
+  process.env.EXPO_PUBLIC_API_URL || 'https://raydo-app-tqev.onrender.com';
 
 export default function DriverTrackScreen() {
   const [isTracking, setIsTracking] = useState(false);

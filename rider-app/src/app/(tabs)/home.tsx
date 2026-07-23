@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Platform,
   StatusBar,
   Linking,
+  AppState,
+  type AppStateStatus,
 } from 'react-native';
 import MapView, { Marker, Region } from 'react-native-maps';
 import { useRouter } from 'expo-router';
@@ -21,13 +23,13 @@ import {
   Clock,
   Home,
   Briefcase,
-  Navigation,
   RefreshCw,
   MapPin,
   Sparkles,
   Crosshair,
 } from 'lucide-react-native';
 import { useCurrentLocation } from '@/hooks/use-current-location';
+import { MapErrorBoundary } from '@/components/MapErrorBoundary';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 
@@ -40,6 +42,9 @@ const DEFAULT_REGION: Region = {
 };
 
 const TAB_BAR_H = Platform.OS === 'ios' ? 84 : 68;
+
+/** How long to wait after home is stable before mounting MapView (MIUI crash fix) */
+const MAP_MOUNT_DELAY_MS = 1500;
 
 const RECENT_PLACES = [
   {
@@ -84,52 +89,90 @@ export default function RiderHomeScreen() {
   const mapRef = useRef<MapView>(null);
   const didCenterRef = useRef(false);
 
-  const { coords, address, loading, error, refresh, requestPermission } = useCurrentLocation({
+  // Home must NEVER open the permission dialog while MapView is loading.
+  // Permission is requested on login screen. Here we only read GPS if already allowed.
+  const { coords, address, loading, error, refresh } = useCurrentLocation({
     watch: true,
-    highAccuracy: true,
+    highAccuracy: false,
+    autoStart: true,
+    onlyIfGranted: true,
+    startDelayMs: 1800,
   });
 
   const [mapReady, setMapReady] = useState(false);
+  const [showMap, setShowMap] = useState(false);
+  const [mapKey, setMapKey] = useState(0);
+  const [mapDisabled, setMapDisabled] = useState(false);
 
-  // When live GPS arrives → move map pointer to exact location
+  // Mount map only when app is active + delayed (permission Activity fully gone)
   useEffect(() => {
-    if (!coords || !mapReady) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+
+    const tryMount = () => {
+      if (cancelled || mapDisabled) return;
+      if (AppState.currentState !== 'active') return;
+      timer = setTimeout(() => {
+        if (!cancelled && AppState.currentState === 'active') {
+          setShowMap(true);
+        }
+      }, MAP_MOUNT_DELAY_MS);
+    };
+
+    tryMount();
+
+    const onState = (s: AppStateStatus) => {
+      if (s === 'active' && !showMap) tryMount();
+    };
+    const sub = AppState.addEventListener('change', onState);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      sub.remove();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mapDisabled]);
+
+  // When live GPS arrives → move map pointer
+  useEffect(() => {
+    if (!coords || !mapReady || !showMap) return;
 
     const next: Region = {
       latitude: coords.latitude,
       longitude: coords.longitude,
-      latitudeDelta: 0.008,
-      longitudeDelta: 0.008,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
     };
 
-    // First fix: jump; later updates: smooth animate
-    if (!didCenterRef.current) {
-      didCenterRef.current = true;
-      mapRef.current?.animateToRegion(next, 600);
-    } else {
-      mapRef.current?.animateToRegion(next, 400);
+    try {
+      if (!didCenterRef.current) {
+        didCenterRef.current = true;
+        mapRef.current?.animateToRegion(next, 500);
+      } else {
+        mapRef.current?.animateToRegion(next, 350);
+      }
+    } catch {
+      /* ignore animate failures */
     }
-  }, [coords?.latitude, coords?.longitude, mapReady]);
+  }, [coords?.latitude, coords?.longitude, mapReady, showMap]);
 
-  const goToMyLocation = async () => {
-    const ok = await requestPermission();
-    if (!ok) {
+  const goToMyLocation = useCallback(async () => {
+    try {
+      await refresh();
+    } catch {
       Linking.openSettings();
-      return;
     }
-    await refresh();
-    if (coords) {
-      mapRef.current?.animateToRegion(
-        {
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          latitudeDelta: 0.008,
-          longitudeDelta: 0.008,
-        },
-        500,
-      );
-    }
-  };
+  }, [refresh]);
+
+  const retryMap = useCallback(() => {
+    setMapDisabled(false);
+    setShowMap(false);
+    setMapReady(false);
+    didCenterRef.current = false;
+    setMapKey((k) => k + 1);
+    setTimeout(() => setShowMap(true), MAP_MOUNT_DELAY_MS);
+  }, []);
 
   const goSearch = (drop?: string) => {
     router.push({
@@ -146,44 +189,78 @@ export default function RiderHomeScreen() {
   const sheetMaxH = SCREEN_H * 0.48;
   const bottomPad = TAB_BAR_H + Math.max(insets.bottom, 0);
 
+  const mapFallback = (
+    <View style={[styles.map, styles.mapPlaceholder]}>
+      <MapPin color={Colors.primary} size={32} />
+      <Text style={styles.mapFallbackTitle}>Map ready soon</Text>
+      <Text style={styles.mapFallbackSub}>You can still search & book below</Text>
+      {mapDisabled ? (
+        <TouchableOpacity style={styles.mapRetryBtn} onPress={retryMap}>
+          <Text style={styles.mapRetryText}>Show map</Text>
+        </TouchableOpacity>
+      ) : (
+        <ActivityIndicator style={{ marginTop: 12 }} color={Colors.primary} />
+      )}
+    </View>
+  );
+
   return (
     <View style={styles.root}>
       <StatusBar barStyle="dark-content" />
 
-      {/* ── Full-screen Google / default map ── */}
-      <MapView
-        ref={mapRef}
-        style={styles.map}
-        // Do NOT force PROVIDER_GOOGLE without API key (causes blank map in Expo Go)
-        initialRegion={DEFAULT_REGION}
-        onMapReady={() => setMapReady(true)}
-        showsUserLocation={!!coords}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        showsBuildings
-        loadingEnabled
-        moveOnMarkerPress={false}
-        toolbarEnabled={false}
-      >
-        {coords ? (
-          <Marker
-            coordinate={{
-              latitude: coords.latitude,
-              longitude: coords.longitude,
-            }}
-            title="You are here"
-            description={address || 'Live location'}
-            anchor={{ x: 0.5, y: 0.5 }}
+      {/* Map loads late + simple pin only — custom marker Views crash some Xiaomi devices */}
+      {showMap && !mapDisabled ? (
+        <MapErrorBoundary
+          key={mapKey}
+          onRetry={retryMap}
+          fallback={mapFallback}
+        >
+          <MapView
+            ref={mapRef}
+            style={styles.map}
+            initialRegion={
+              coords
+                ? {
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    latitudeDelta: 0.02,
+                    longitudeDelta: 0.02,
+                  }
+                : DEFAULT_REGION
+            }
+            onMapReady={() => setMapReady(true)}
+            // If native map dies, user can continue with sheet UI
+            onMapLoaded={() => setMapReady(true)}
+            showsUserLocation={false}
+            showsMyLocationButton={false}
+            showsCompass={false}
+            showsBuildings={false}
+            showsTraffic={false}
+            showsIndoors={false}
+            loadingEnabled={false}
+            moveOnMarkerPress={false}
+            toolbarEnabled={false}
+            pitchEnabled={false}
+            rotateEnabled={false}
+            liteMode={false}
           >
-            <View style={styles.userMarkerOuter}>
-              <View style={styles.userMarkerPulse} />
-              <View style={styles.userMarkerDot} />
-            </View>
-          </Marker>
-        ) : null}
-      </MapView>
+            {coords ? (
+              <Marker
+                coordinate={{
+                  latitude: coords.latitude,
+                  longitude: coords.longitude,
+                }}
+                title="You are here"
+                description={address || 'Live location'}
+                pinColor={Colors.primary}
+              />
+            ) : null}
+          </MapView>
+        </MapErrorBoundary>
+      ) : (
+        mapFallback
+      )}
 
-      {/* Loading overlay while first GPS fix */}
       {loading && !coords ? (
         <View style={styles.gpsBanner}>
           <ActivityIndicator size="small" color={Colors.primary} />
@@ -203,7 +280,6 @@ export default function RiderHomeScreen() {
         </View>
       ) : null}
 
-      {/* Top bar */}
       <View style={[styles.topBar, { top: Math.max(insets.top, 10) + 6 }]}>
         <View style={styles.brandPill}>
           <View style={styles.brandMark}>
@@ -217,7 +293,6 @@ export default function RiderHomeScreen() {
         </TouchableOpacity>
       </View>
 
-      {/* Recenter on live GPS */}
       <TouchableOpacity
         style={[styles.locateBtn, { bottom: sheetMaxH + 12 }]}
         onPress={goToMyLocation}
@@ -226,7 +301,6 @@ export default function RiderHomeScreen() {
         <Crosshair color={Colors.primary} size={22} />
       </TouchableOpacity>
 
-      {/* ── Bottom sheet (scrollable, above tab bar) ── */}
       <View
         style={[
           styles.sheet,
@@ -325,7 +399,6 @@ export default function RiderHomeScreen() {
             </TouchableOpacity>
           ))}
 
-          {/* Extra space so last item is not tight */}
           <View style={{ height: 12 }} />
         </ScrollView>
       </View>
@@ -346,6 +419,35 @@ const styles = StyleSheet.create({
     bottom: 0,
     width: SCREEN_W,
     height: SCREEN_H,
+  },
+  mapPlaceholder: {
+    backgroundColor: Colors.mapTint,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 24,
+  },
+  mapFallbackTitle: {
+    marginTop: 8,
+    fontSize: 16,
+    fontWeight: '800',
+    color: Colors.text,
+  },
+  mapFallbackSub: {
+    fontSize: 13,
+    color: Colors.textSecondary,
+    textAlign: 'center',
+  },
+  mapRetryBtn: {
+    marginTop: 12,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: Radius.full,
+  },
+  mapRetryText: {
+    color: Colors.white,
+    fontWeight: '800',
   },
   gpsBanner: {
     position: 'absolute',
@@ -392,27 +494,6 @@ const styles = StyleSheet.create({
     color: Colors.white,
     fontWeight: '800',
     fontSize: 12,
-  },
-  userMarkerOuter: {
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  userMarkerPulse: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(201, 162, 93, 0.28)',
-  },
-  userMarkerDot: {
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: Colors.accent,
-    borderWidth: 3,
-    borderColor: Colors.white,
   },
   topBar: {
     position: 'absolute',
