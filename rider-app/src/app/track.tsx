@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Alert, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, Linking } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE, UrlTile } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { io, Socket } from 'socket.io-client';
 import axios from 'axios';
@@ -130,8 +130,17 @@ export default function TrackScreen() {
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <MapView style={styles.map}
+        provider={PROVIDER_GOOGLE}
+        mapType={Platform.OS === 'android' ? 'none' : 'standard'}
         initialRegion={{ latitude: location.coords.latitude, longitude: location.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
       >
+        {Platform.OS === 'android' && (
+          <UrlTile
+            urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            maximumZ={19}
+            flipY={false}
+          />
+        )}
         <Marker coordinate={{ latitude: location.coords.latitude, longitude: location.coords.longitude }} title="You">
           <View style={styles.riderMarker}><MapPin color="white" size={20} /></View>
         </Marker>
