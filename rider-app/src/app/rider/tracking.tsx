@@ -9,7 +9,8 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import MapView, { Marker, Polyline, Region, PROVIDER_GOOGLE } from 'react-native-maps';
+import DummyMap from '@/components/DummyMap';
+import { Region } from 'react-native-maps';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Phone, ShieldAlert, Navigation, RefreshCw } from 'lucide-react-native';
@@ -429,46 +430,13 @@ export default function TrackingScreen() {
     <View style={styles.container}>
       <View style={styles.mapContainer}>
         {region ? (
-          <MapView
-            ref={mapRef}
-            provider={PROVIDER_GOOGLE}
+          <DummyMap
             style={styles.map}
-            initialRegion={region}
-            showsUserLocation
-            showsMyLocationButton={false}
-            loadingEnabled
-          >
-            {coords ? (
-              <Marker
-                coordinate={{ latitude: coords.latitude, longitude: coords.longitude }}
-                title="You (rider)"
-                description={address}
-                pinColor="#C9A25D"
-              >
-                <View style={styles.youPin}>
-                  <View style={styles.youDot} />
-                </View>
-              </Marker>
-            ) : null}
-            {driverLoc ? (
-              <Marker
-                coordinate={{ latitude: driverLoc.lat, longitude: driverLoc.lng }}
-                title={d?.name || 'Driver'}
-                description="Live location"
-              >
-                <View style={styles.driverPin}>
-                  <Navigation color={Colors.white} size={14} />
-                </View>
-              </Marker>
-            ) : null}
-            {routeCoords.length > 1 ? (
-              <Polyline
-                coordinates={routeCoords}
-                strokeColor={Colors.primary}
-                strokeWidth={4}
-              />
-            ) : null}
-          </MapView>
+            latitude={coords?.latitude}
+            longitude={coords?.longitude}
+            address={address || undefined}
+            driver={!!driverLoc}
+          />
         ) : (
           <View style={styles.mapFallback}>
             <ActivityIndicator color={Colors.primary} />

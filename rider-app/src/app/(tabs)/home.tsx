@@ -13,7 +13,8 @@ import {
   AppState,
   type AppStateStatus,
 } from 'react-native';
-import MapView, { Marker, Region, PROVIDER_GOOGLE } from 'react-native-maps';
+import DummyMap from '@/components/DummyMap';
+import { Region } from 'react-native-maps';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
@@ -215,48 +216,12 @@ export default function RiderHomeScreen() {
           onRetry={retryMap}
           fallback={mapFallback}
         >
-          <MapView
-            ref={mapRef}
-            provider={PROVIDER_GOOGLE}
+          <DummyMap
             style={styles.map}
-            initialRegion={
-              coords
-                ? {
-                    latitude: coords.latitude,
-                    longitude: coords.longitude,
-                    latitudeDelta: 0.02,
-                    longitudeDelta: 0.02,
-                  }
-                : DEFAULT_REGION
-            }
-            onMapReady={() => setMapReady(true)}
-            // If native map dies, user can continue with sheet UI
-            onMapLoaded={() => setMapReady(true)}
-            showsUserLocation={false}
-            showsMyLocationButton={false}
-            showsCompass={false}
-            showsBuildings={false}
-            showsTraffic={false}
-            showsIndoors={false}
-            loadingEnabled={false}
-            moveOnMarkerPress={false}
-            toolbarEnabled={false}
-            pitchEnabled={false}
-            rotateEnabled={false}
-            liteMode={false}
-          >
-            {coords ? (
-              <Marker
-                coordinate={{
-                  latitude: coords.latitude,
-                  longitude: coords.longitude,
-                }}
-                title="You are here"
-                description={address || 'Live location'}
-                pinColor={Colors.primary}
-              />
-            ) : null}
-          </MapView>
+            latitude={coords?.latitude}
+            longitude={coords?.longitude}
+            address={address || undefined}
+          />
         </MapErrorBoundary>
       ) : (
         mapFallback

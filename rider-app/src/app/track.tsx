@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Alert, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, Linking } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import DummyMap from '@/components/DummyMap';
 import * as Location from 'expo-location';
 import { io, Socket } from 'socket.io-client';
 import axios from 'axios';
@@ -132,21 +132,12 @@ export default function TrackScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <MapView style={styles.map}
-        provider={PROVIDER_GOOGLE}
-        initialRegion={{ latitude: location.coords.latitude, longitude: location.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
-      >
-        <Marker coordinate={{ latitude: location.coords.latitude, longitude: location.coords.longitude }} title="You">
-          <View style={styles.riderMarker}><MapPin color="white" size={20} /></View>
-        </Marker>
-        {driverLocation && (
-          <Marker coordinate={{ latitude: driverLocation.lat, longitude: driverLocation.lng }} title="Driver">
-            <View style={styles.driverMarker}><Navigation color="white" size={20} /></View>
-          </Marker>
-        )}
-        {routeCoords.length > 0 && <Polyline coordinates={routeCoords} strokeColor={Colors.accent} strokeWidth={4} />}
-      </MapView>
-
+      <DummyMap
+        style={styles.map}
+        latitude={location.coords.latitude}
+        longitude={location.coords.longitude}
+        driver={!!driverLocation}
+      />
       <View style={styles.bottomSheet}>
         <View style={styles.infoRow}>
           <View>
