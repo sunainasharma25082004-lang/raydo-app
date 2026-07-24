@@ -186,13 +186,20 @@ export function useCurrentLocation(options?: {
       setPermission(existing.status);
 
       let ok = existing.status === Location.PermissionStatus.GRANTED;
+      let justGranted = false;
       if (!ok) {
         ok = await requestPermission({ silent: false });
+        justGranted = ok;
       }
       if (!ok) {
         setLoading(false);
         setAddress('Location permission required');
         return;
+      }
+
+      if (justGranted) {
+        // Wait for OS to propagate permission internally to avoid SecurityException crash
+        await new Promise((res) => setTimeout(res, 600));
       }
 
       try {

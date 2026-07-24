@@ -72,8 +72,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "081abd09-7e23-4c63-a070-308c42f1d5c8"
+        "projectId": "e8d2eaa4-b92f-43a9-9c5a-7ece3fa6feb7"
       }
-    }
+    },
+    "owner": "terii9918s-team"
   }
 }

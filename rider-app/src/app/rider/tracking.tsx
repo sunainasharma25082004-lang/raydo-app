@@ -9,7 +9,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import MapView, { Marker, Polyline, Region, PROVIDER_GOOGLE, UrlTile } from 'react-native-maps';
+import MapView, { Marker, Polyline, Region, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Phone, ShieldAlert, Navigation, RefreshCw } from 'lucide-react-native';
@@ -433,19 +433,11 @@ export default function TrackingScreen() {
             ref={mapRef}
             provider={PROVIDER_GOOGLE}
             style={styles.map}
-            mapType={Platform.OS === 'android' ? 'none' : 'standard'}
             initialRegion={region}
             showsUserLocation
             showsMyLocationButton={false}
             loadingEnabled
           >
-            {Platform.OS === 'android' && (
-              <UrlTile
-                urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                maximumZ={19}
-                flipY={false}
-              />
-            )}
             {coords ? (
               <Marker
                 coordinate={{ latitude: coords.latitude, longitude: coords.longitude }}

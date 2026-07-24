@@ -64,7 +64,8 @@
           "locationAlwaysAndWhenInUsePermission": "Allow Raydo Driver to use your location while you are online.",
           "isAndroidForegroundServiceEnabled": false
         }
-      ]
+      ],
+      "react-native-maps"
     ],
     "experiments": {
       "typedRoutes": true,

@@ -13,7 +13,7 @@ import {
   AppState,
   type AppStateStatus,
 } from 'react-native';
-import MapView, { Marker, Region, PROVIDER_GOOGLE, UrlTile } from 'react-native-maps';
+import MapView, { Marker, Region, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
@@ -219,7 +219,6 @@ export default function RiderHomeScreen() {
             ref={mapRef}
             provider={PROVIDER_GOOGLE}
             style={styles.map}
-            mapType={Platform.OS === 'android' ? 'none' : 'standard'}
             initialRegion={
               coords
                 ? {
@@ -246,13 +245,6 @@ export default function RiderHomeScreen() {
             rotateEnabled={false}
             liteMode={false}
           >
-            {Platform.OS === 'android' && (
-              <UrlTile
-                urlTemplate="https://a.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                maximumZ={19}
-                flipY={false}
-              />
-            )}
             {coords ? (
               <Marker
                 coordinate={{
