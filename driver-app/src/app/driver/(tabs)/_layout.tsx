@@ -1,27 +1,34 @@
 import { Tabs } from 'expo-router';
 import { History, Home, IndianRupee, UserRound } from 'lucide-react-native';
-import { Colors } from '@/constants/Colors';
 import { Platform } from 'react-native';
+import { useAppTheme } from '@/context/ThemeContext';
+import { useMemo } from 'react';
 
 export default function DriverTabsLayout() {
+  const { colors, isDark } = useAppTheme();
+  const tabBarStyle = useMemo(
+    () => ({
+      height: Platform.OS === 'ios' ? 88 : 68,
+      paddingTop: 8,
+      backgroundColor: colors.surface,
+      borderTopColor: colors.border,
+      borderTopWidth: 1,
+    }),
+    [colors, isDark],
+  );
+
   return (
     <Tabs
       screenOptions={{
         headerShown: false,
-        tabBarActiveTintColor: Colors.primary,
-        tabBarInactiveTintColor: Colors.textLight,
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textLight,
         tabBarLabelStyle: {
           fontSize: 11,
           fontWeight: '700',
           marginBottom: Platform.OS === 'ios' ? 0 : 6,
         },
-        tabBarStyle: {
-          height: Platform.OS === 'ios' ? 88 : 68,
-          paddingTop: 8,
-          backgroundColor: Colors.surface,
-          borderTopColor: Colors.border,
-          borderTopWidth: 1,
-        },
+        tabBarStyle,
       }}
     >
       <Tabs.Screen

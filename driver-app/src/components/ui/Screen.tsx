@@ -8,7 +8,7 @@ import {
   StatusBar,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors } from '@/constants/Colors';
+import { useAppTheme } from '@/context/ThemeContext';
 
 type Props = {
   children: React.ReactNode;
@@ -26,17 +26,20 @@ export function Screen({
   style,
   contentStyle,
   edges = ['top', 'bottom'],
-  backgroundColor = Colors.background,
-  statusBarStyle = 'dark-content',
+  backgroundColor,
+  statusBarStyle,
 }: Props) {
   const insets = useSafeAreaInsets();
+  const { colors, isDark } = useAppTheme();
+  const bg = backgroundColor ?? colors.background;
+  const bar = statusBarStyle ?? (isDark ? 'light-content' : 'dark-content');
   const paddingTop = edges.includes('top') ? insets.top : 0;
   const paddingBottom = edges.includes('bottom') ? Math.max(insets.bottom, 12) : 0;
 
   if (scroll) {
     return (
-      <View style={[styles.root, { backgroundColor, paddingTop }, style]}>
-        <StatusBar barStyle={statusBarStyle} backgroundColor={backgroundColor} />
+      <View style={[styles.root, { backgroundColor: bg, paddingTop }, style]}>
+        <StatusBar barStyle={bar} backgroundColor={bg} />
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={[
@@ -53,14 +56,8 @@ export function Screen({
   }
 
   return (
-    <View
-      style={[
-        styles.root,
-        { backgroundColor, paddingTop, paddingBottom },
-        style,
-      ]}
-    >
-      <StatusBar barStyle={statusBarStyle} backgroundColor={backgroundColor} />
+    <View style={[styles.root, { backgroundColor: bg, paddingTop, paddingBottom }, style]}>
+      <StatusBar barStyle={bar} backgroundColor={bg} />
       <View style={[styles.fill, contentStyle]}>{children}</View>
     </View>
   );

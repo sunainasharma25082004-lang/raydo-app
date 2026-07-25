@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ChevronLeft } from 'lucide-react-native';
-import { Colors, Radius } from '@/constants/Colors';
+import { Radius } from '@/constants/Colors';
+import { useAppTheme } from '@/context/ThemeContext';
 
 type Props = {
   title: string;
@@ -11,6 +12,43 @@ type Props = {
 
 export function ScreenHeader({ title, subtitle }: Props) {
   const router = useRouter();
+  const { colors } = useAppTheme();
+  const styles = useMemo(
+    () =>
+      StyleSheet.create({
+        header: {
+          flexDirection: 'row',
+          alignItems: 'center',
+          paddingHorizontal: 16,
+          paddingBottom: 12,
+          gap: 10,
+        },
+        backBtn: {
+          width: 40,
+          height: 40,
+          borderRadius: Radius.md,
+          backgroundColor: colors.surface,
+          borderWidth: 1,
+          borderColor: colors.border,
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        titles: { flex: 1 },
+        title: {
+          fontSize: 20,
+          fontWeight: '800',
+          color: colors.text,
+        },
+        subtitle: {
+          fontSize: 12,
+          color: colors.textLight,
+          marginTop: 2,
+          fontWeight: '600',
+        },
+        spacer: { width: 40 },
+      }),
+    [colors],
+  );
 
   return (
     <View style={styles.header}>
@@ -21,7 +59,7 @@ export function ScreenHeader({ title, subtitle }: Props) {
         }
         hitSlop={12}
       >
-        <ChevronLeft color={Colors.primary} size={22} />
+        <ChevronLeft color={colors.primary} size={22} />
       </Pressable>
       <View style={styles.titles}>
         <Text style={styles.title}>{title}</Text>
@@ -31,36 +69,3 @@ export function ScreenHeader({ title, subtitle }: Props) {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingBottom: 12,
-    gap: 10,
-  },
-  backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: Radius.md,
-    backgroundColor: Colors.surface,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  titles: { flex: 1 },
-  title: {
-    fontSize: 20,
-    fontWeight: '800',
-    color: Colors.text,
-  },
-  subtitle: {
-    fontSize: 12,
-    color: Colors.textLight,
-    marginTop: 2,
-    fontWeight: '600',
-  },
-  spacer: { width: 40 },
-});

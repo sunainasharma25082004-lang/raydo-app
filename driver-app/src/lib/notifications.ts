@@ -1,30 +1,57 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
+/**
+ * Expo Go (SDK 53+) throws if expo-notifications is imported on Android.
+ * Development builds support full notifications; Expo Go no-ops safely.
+ */
+const isExpoGo = Constants.appOwnership === 'expo';
+
+type NotificationsModule = typeof import('expo-notifications');
+
+let Notifications: NotificationsModule | null = null;
+let loadAttempted = false;
 let configured = false;
+
+function getNotifications(): NotificationsModule | null {
+  if (isExpoGo) return null;
+  if (loadAttempted) return Notifications;
+  loadAttempted = true;
+  try {
+    // Lazy require — never top-level import (crashes Expo Go)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    Notifications = require('expo-notifications') as NotificationsModule;
+  } catch (e) {
+    console.warn('[Notifications] unavailable in this runtime', e);
+    Notifications = null;
+  }
+  return Notifications;
+}
 
 /**
  * Local notifications for driver (ride request, chat, trip).
- * Works in Expo Go with local notifications; remote push needs EAS credentials.
+ * Real push needs a dev/production build + EAS credentials.
  */
 export async function setupDriverNotifications() {
-  if (configured) return;
+  const N = getNotifications();
+  if (!N) return false;
+  if (configured) return true;
   configured = true;
 
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
-
   try {
-    const { status: existing } = await Notifications.getPermissionsAsync();
+    N.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+
+    const { status: existing } = await N.getPermissionsAsync();
     let final = existing;
     if (existing !== 'granted') {
-      const asked = await Notifications.requestPermissionsAsync();
+      const asked = await N.requestPermissionsAsync();
       final = asked.status;
     }
     if (final !== 'granted') {
@@ -33,17 +60,17 @@ export async function setupDriverNotifications() {
     }
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('rides', {
+      await N.setNotificationChannelAsync('rides', {
         name: 'Ride requests',
-        importance: Notifications.AndroidImportance.MAX,
+        importance: N.AndroidImportance.MAX,
         vibrationPattern: [0, 250, 120, 250],
         lightColor: '#C9A25D',
         sound: 'default',
         enableVibrate: true,
       });
-      await Notifications.setNotificationChannelAsync('general', {
+      await N.setNotificationChannelAsync('general', {
         name: 'General',
-        importance: Notifications.AndroidImportance.DEFAULT,
+        importance: N.AndroidImportance.DEFAULT,
         sound: 'default',
       });
     }
@@ -62,22 +89,34 @@ export async function notifyRideRequest(opts: {
   distanceKm?: number | null;
 }) {
   try {
-    await setupDriverNotifications();
+    const N = getNotifications();
     const dist =
       opts.distanceKm != null && Number.isFinite(Number(opts.distanceKm))
         ? ` · ${Number(opts.distanceKm).toFixed(1)} km away`
         : '';
-    await Notifications.scheduleNotificationAsync({
+    const title = '🚗 New ride request';
+    const body = `${opts.riderName} · ₹${opts.fare}${dist}\n${opts.pickup}${
+      opts.vehicle ? ` · ${opts.vehicle}` : ''
+    }`;
+
+    if (!N) {
+      // Expo Go: still show in-app request card; log only
+      console.log('[Notify]', title, body);
+      return;
+    }
+
+    const ok = await setupDriverNotifications();
+    if (!ok) return;
+
+    await N.scheduleNotificationAsync({
       content: {
-        title: '🚗 New ride request',
-        body: `${opts.riderName} · ₹${opts.fare}${dist}\n${opts.pickup}${
-          opts.vehicle ? ` · ${opts.vehicle}` : ''
-        }`,
+        title,
+        body,
         sound: true,
         data: { type: 'ride_request' },
         ...(Platform.OS === 'android' ? { channelId: 'rides' } : {}),
       },
-      trigger: null, // immediate
+      trigger: null,
     });
   } catch (e) {
     console.warn('[Notifications] ride request notify failed', e);
@@ -86,8 +125,14 @@ export async function notifyRideRequest(opts: {
 
 export async function notifyTripUpdate(title: string, body: string) {
   try {
-    await setupDriverNotifications();
-    await Notifications.scheduleNotificationAsync({
+    const N = getNotifications();
+    if (!N) {
+      console.log('[Notify]', title, body);
+      return;
+    }
+    const ok = await setupDriverNotifications();
+    if (!ok) return;
+    await N.scheduleNotificationAsync({
       content: {
         title,
         body,

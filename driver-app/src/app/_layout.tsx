@@ -4,26 +4,37 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet } from 'react-native';
 import { DriverProvider } from '@/context/DriverContext';
 import { SessionProvider } from '@/context/SessionContext';
-import { Colors } from '@/constants/Colors';
+import { ThemeProvider, useAppTheme } from '@/context/ThemeContext';
+
+function RootNav() {
+  const { isDark, colors } = useAppTheme();
+  return (
+    <>
+      <StatusBar style={isDark ? 'light' : 'dark'} />
+      <Stack
+        screenOptions={{
+          headerShown: false,
+          contentStyle: { backgroundColor: colors.background },
+          animation: 'fade',
+        }}
+      >
+        <Stack.Screen name="index" />
+        <Stack.Screen name="driver" />
+      </Stack>
+    </>
+  );
+}
 
 export default function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.root}>
-      <SessionProvider>
-        <DriverProvider>
-          <StatusBar style="dark" />
-          <Stack
-            screenOptions={{
-              headerShown: false,
-              contentStyle: { backgroundColor: Colors.background },
-              animation: 'fade',
-            }}
-          >
-            <Stack.Screen name="index" />
-            <Stack.Screen name="driver" />
-          </Stack>
-        </DriverProvider>
-      </SessionProvider>
+      <ThemeProvider>
+        <SessionProvider>
+          <DriverProvider>
+            <RootNav />
+          </DriverProvider>
+        </SessionProvider>
+      </ThemeProvider>
     </GestureHandlerRootView>
   );
 }

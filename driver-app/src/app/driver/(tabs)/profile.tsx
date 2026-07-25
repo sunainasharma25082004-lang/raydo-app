@@ -18,7 +18,9 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { useDriver } from '@/context/DriverContext';
 import { useSession } from '@/context/SessionContext';
-import { Colors, Radius, Shadow } from '@/constants/Colors';
+import { Radius } from '@/constants/Colors';
+import { useAppTheme } from '@/context/ThemeContext';
+import { useMemo } from 'react';
 
 const MENU: { icon: typeof Car; label: string; value: string; href: Href }[] = [
   { icon: Car, label: 'Vehicle details', value: '', href: '/driver/vehicle' as Href },
@@ -33,6 +35,8 @@ export default function ProfileScreen() {
   const router = useRouter();
   const { driver, todayTrips, todayEarnings } = useDriver();
   const { clearSession, driver: sessionDriver } = useSession();
+  const { colors, shadow } = useAppTheme();
+  const styles = useMemo(() => createStyles(colors, shadow), [colors, shadow]);
 
   return (
     <Screen scroll contentStyle={styles.content}>
@@ -51,7 +55,7 @@ export default function ProfileScreen() {
         <View style={styles.profileInfo}>
           <View style={styles.nameRow}>
             <Text style={styles.name}>{driver.name}</Text>
-            <BadgeCheck size={18} color={Colors.success} />
+            <BadgeCheck size={18} color={colors.success} />
           </View>
           <Text style={styles.phone}>{driver.phone}</Text>
           {driver.loginId ? (
@@ -62,7 +66,7 @@ export default function ProfileScreen() {
           </Text>
           <View style={styles.metaRow}>
             <View style={styles.metaChip}>
-              <Star size={12} color={Colors.accent} fill={Colors.accent} />
+              <Star size={12} color={colors.accent} fill={colors.accent} />
               <Text style={styles.metaText}>{driver.rating}</Text>
             </View>
             <View style={styles.metaChip}>
@@ -106,13 +110,13 @@ export default function ProfileScreen() {
               onPress={() => router.push(item.href)}
             >
               <View style={styles.menuIcon}>
-                <Icon size={18} color={Colors.primary} />
+                <Icon size={18} color={colors.primary} />
               </View>
               <View style={styles.menuTextWrap}>
                 <Text style={styles.menuLabel}>{item.label}</Text>
                 {value ? <Text style={styles.menuValue}>{value}</Text> : null}
               </View>
-              <ChevronRight size={18} color={Colors.textLight} />
+              <ChevronRight size={18} color={colors.textLight} />
             </Pressable>
           );
         })}
@@ -134,7 +138,7 @@ export default function ProfileScreen() {
             },
           ])
         }
-        leftIcon={<LogOut size={16} color={Colors.primary} />}
+        leftIcon={<LogOut size={16} color={colors.primary} />}
         fullWidth
       />
 
@@ -143,7 +147,11 @@ export default function ProfileScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(
+  colors: ReturnType<typeof useAppTheme>['colors'],
+  _shadow: ReturnType<typeof useAppTheme>['shadow'],
+) {
+  return StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 12,
@@ -153,7 +161,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 28,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
   },
   profileCard: {
     flexDirection: 'row',
@@ -164,12 +172,12 @@ const styles = StyleSheet.create({
     width: 72,
     height: 72,
     borderRadius: 24,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
-    color: Colors.white,
+    color: colors.white,
     fontSize: 22,
     fontWeight: '800',
   },
@@ -182,11 +190,11 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 20,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
   },
   phone: {
     fontSize: 13,
-    color: Colors.textSecondary,
+    color: colors.textSecondary,
     fontWeight: '600',
   },
   metaRow: {
@@ -199,7 +207,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
-    backgroundColor: Colors.surfaceMuted,
+    backgroundColor: colors.surfaceMuted,
     borderRadius: Radius.full,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -207,7 +215,7 @@ const styles = StyleSheet.create({
   metaText: {
     fontSize: 11,
     fontWeight: '700',
-    color: Colors.textSecondary,
+    color: colors.textSecondary,
   },
   statsRow: {
     flexDirection: 'row',
@@ -215,22 +223,22 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: Colors.surface,
+    backgroundColor: colors.surface,
     borderRadius: Radius.md,
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: colors.border,
     paddingVertical: 14,
     alignItems: 'center',
-    ...Shadow.soft,
+    ..._shadow.soft,
   },
   statValue: {
     fontSize: 15,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
   },
   statLabel: {
     fontSize: 11,
-    color: Colors.textLight,
+    color: colors.textLight,
     marginTop: 4,
     fontWeight: '600',
   },
@@ -243,13 +251,13 @@ const styles = StyleSheet.create({
   },
   menuBorder: {
     borderBottomWidth: 1,
-    borderBottomColor: Colors.border,
+    borderBottomColor: colors.border,
   },
   menuIcon: {
     width: 38,
     height: 38,
     borderRadius: 12,
-    backgroundColor: Colors.surfaceMuted,
+    backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -257,17 +265,18 @@ const styles = StyleSheet.create({
   menuLabel: {
     fontSize: 15,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
   },
   menuValue: {
     fontSize: 12,
-    color: Colors.textLight,
+    color: colors.textLight,
     marginTop: 2,
   },
   version: {
     textAlign: 'center',
-    color: Colors.textLight,
+    color: colors.textLight,
     fontSize: 12,
     marginTop: 4,
   },
-});
+  });
+}

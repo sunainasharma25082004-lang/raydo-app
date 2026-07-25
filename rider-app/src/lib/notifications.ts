@@ -1,41 +1,69 @@
 import { Platform } from 'react-native';
-import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
+/**
+ * Expo Go (SDK 53+) throws if expo-notifications is imported on Android.
+ * Use a development build for real push; in Expo Go we no-op safely.
+ */
+const isExpoGo = Constants.appOwnership === 'expo';
+
+type NotificationsModule = typeof import('expo-notifications');
+
+let Notifications: NotificationsModule | null = null;
+let loadAttempted = false;
 let configured = false;
 
+function getNotifications(): NotificationsModule | null {
+  if (isExpoGo) return null;
+  if (loadAttempted) return Notifications;
+  loadAttempted = true;
+  try {
+    // Lazy require — never top-level import (crashes Expo Go)
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    Notifications = require('expo-notifications') as NotificationsModule;
+  } catch (e) {
+    console.warn('[Notifications] unavailable in this runtime', e);
+    Notifications = null;
+  }
+  return Notifications;
+}
+
 export async function setupRiderNotifications() {
-  if (configured) return;
+  const N = getNotifications();
+  if (!N) return false;
+  if (configured) return true;
   configured = true;
 
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowBanner: true,
-      shouldShowList: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-    }),
-  });
-
   try {
-    const { status: existing } = await Notifications.getPermissionsAsync();
+    N.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+      }),
+    });
+
+    const { status: existing } = await N.getPermissionsAsync();
     let final = existing;
     if (existing !== 'granted') {
-      const asked = await Notifications.requestPermissionsAsync();
+      const asked = await N.requestPermissionsAsync();
       final = asked.status;
     }
     if (final !== 'granted') return false;
 
     if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync('rides', {
+      await N.setNotificationChannelAsync('rides', {
         name: 'Ride updates',
-        importance: Notifications.AndroidImportance.MAX,
+        importance: N.AndroidImportance.MAX,
         vibrationPattern: [0, 200, 100, 200],
         lightColor: '#C9A25D',
         sound: 'default',
       });
     }
     return true;
-  } catch {
+  } catch (e) {
+    console.warn('[Notifications] setup failed', e);
     return false;
   }
 }
@@ -46,10 +74,21 @@ export async function notifyDriverAssigned(opts: {
   vehicle?: string;
 }) {
   try {
-    await setupRiderNotifications();
-    const eta =
-      opts.etaMinutes != null ? ` · ETA ~${opts.etaMinutes} min` : '';
-    await Notifications.scheduleNotificationAsync({
+    const N = getNotifications();
+    if (!N) {
+      // Expo Go fallback — console only (UI still works)
+      console.log(
+        '[Notify]',
+        `Driver on the way: ${opts.driverName}`,
+        opts.etaMinutes != null ? `ETA ~${opts.etaMinutes}m` : '',
+      );
+      return;
+    }
+    const ok = await setupRiderNotifications();
+    if (!ok) return;
+
+    const eta = opts.etaMinutes != null ? ` · ETA ~${opts.etaMinutes} min` : '';
+    await N.scheduleNotificationAsync({
       content: {
         title: 'Driver is on the way 🚗',
         body: `${opts.driverName}${opts.vehicle ? ` · ${opts.vehicle}` : ''}${eta}`,
@@ -66,8 +105,14 @@ export async function notifyDriverAssigned(opts: {
 
 export async function notifyRider(title: string, body: string) {
   try {
-    await setupRiderNotifications();
-    await Notifications.scheduleNotificationAsync({
+    const N = getNotifications();
+    if (!N) {
+      console.log('[Notify]', title, body);
+      return;
+    }
+    const ok = await setupRiderNotifications();
+    if (!ok) return;
+    await N.scheduleNotificationAsync({
       content: {
         title,
         body,

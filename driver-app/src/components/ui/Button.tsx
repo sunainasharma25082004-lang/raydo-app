@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -8,7 +8,8 @@ import {
   TextStyle,
   StyleProp,
 } from 'react-native';
-import { Colors, Radius } from '@/constants/Colors';
+import { Radius } from '@/constants/Colors';
+import { useAppTheme } from '@/context/ThemeContext';
 
 type Variant = 'primary' | 'accent' | 'outline' | 'ghost' | 'danger' | 'success';
 type Size = 'sm' | 'md' | 'lg';
@@ -40,7 +41,37 @@ export function Button({
   style,
   textStyle,
 }: Props) {
+  const { colors } = useAppTheme();
   const isDisabled = disabled || loading;
+
+  const variantStyles = useMemo(() => {
+    return {
+      primary: { backgroundColor: colors.primary },
+      accent: { backgroundColor: colors.accent },
+      outline: {
+        backgroundColor: colors.surface,
+        borderWidth: 1.5,
+        borderColor: colors.borderStrong,
+      },
+      ghost: { backgroundColor: 'transparent' },
+      danger: { backgroundColor: colors.error },
+      success: { backgroundColor: colors.success },
+    } as const;
+  }, [colors]);
+
+  const textVariantStyles = useMemo(() => {
+    return {
+      primary: { color: colors.textOnPrimary },
+      accent: { color: colors.textOnAccent },
+      outline: { color: colors.primary },
+      ghost: { color: colors.primary },
+      danger: { color: colors.white },
+      success: { color: colors.white },
+    } as const;
+  }, [colors]);
+
+  const spinnerColor =
+    variant === 'outline' || variant === 'ghost' ? colors.primary : colors.white;
 
   return (
     <Pressable
@@ -57,9 +88,7 @@ export function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator
-          color={variant === 'outline' || variant === 'ghost' ? Colors.primary : Colors.white}
-        />
+        <ActivityIndicator color={spinnerColor} />
       ) : (
         <>
           {leftIcon}
@@ -107,26 +136,4 @@ const sizeTextStyles = StyleSheet.create({
   sm: { fontSize: 13 },
   md: { fontSize: 15 },
   lg: { fontSize: 16 },
-});
-
-const variantStyles = StyleSheet.create({
-  primary: { backgroundColor: Colors.primary },
-  accent: { backgroundColor: Colors.accent },
-  outline: {
-    backgroundColor: Colors.surface,
-    borderWidth: 1.5,
-    borderColor: Colors.borderStrong,
-  },
-  ghost: { backgroundColor: 'transparent' },
-  danger: { backgroundColor: Colors.error },
-  success: { backgroundColor: Colors.success },
-});
-
-const textVariantStyles = StyleSheet.create({
-  primary: { color: Colors.textOnPrimary },
-  accent: { color: Colors.textOnAccent },
-  outline: { color: Colors.primary },
-  ghost: { color: Colors.primary },
-  danger: { color: Colors.white },
-  success: { color: Colors.white },
 });

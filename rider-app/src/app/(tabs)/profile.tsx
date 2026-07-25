@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
@@ -10,9 +10,8 @@ import {
 } from 'react-native';
 import { Href, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Colors, Radius, Shadow } from '@/constants/Colors';
+import { Radius } from '@/constants/Colors';
 import {
-  User,
   CreditCard,
   Clock,
   Settings,
@@ -25,6 +24,7 @@ import {
   Star,
 } from 'lucide-react-native';
 import { clearRiderLogin } from '@/lib/session';
+import { useAppTheme } from '@/context/ThemeContext';
 
 const RIDE_HISTORY = [
   { id: '1', destination: 'Phoenix Marketcity', date: 'Jul 15, 14:30', fare: '₹205', vehicle: 'Auto' },
@@ -35,10 +35,12 @@ const RIDE_HISTORY = [
 export default function ProfileScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { colors, shadow, isDark } = useAppTheme();
+  const styles = useMemo(() => createStyles(colors, shadow), [colors, shadow]);
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 8) }]}>
-      <StatusBar barStyle="dark-content" />
+      <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -54,7 +56,7 @@ export default function ProfileScreen() {
             <Text style={styles.name}>Rahul Sharma</Text>
             <Text style={styles.phone}>+91 98765 43210</Text>
             <View style={styles.ratingRow}>
-              <Star size={12} color={Colors.accent} fill={Colors.accent} />
+              <Star size={12} color={colors.accent} fill={colors.accent} />
               <Text style={styles.ratingText}>4.9 · Premium rider</Text>
             </View>
           </View>
@@ -83,9 +85,11 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <MenuRow
-            icon={<CreditCard color={Colors.primary} size={18} />}
+            icon={<CreditCard color={colors.primary} size={18} />}
             label="Payment methods"
             onPress={() => router.push('/payment-methods' as Href)}
+            styles={styles}
+            colors={colors}
           />
         </View>
 
@@ -115,7 +119,7 @@ export default function ProfileScreen() {
                 }
               >
                 <View style={styles.rideIconBg}>
-                  <Clock color={Colors.textLight} size={18} />
+                  <Clock color={colors.textLight} size={18} />
                 </View>
                 <View style={styles.rideInfo}>
                   <Text style={styles.rideDest} numberOfLines={1}>
@@ -134,31 +138,39 @@ export default function ProfileScreen() {
 
         <View style={styles.section}>
           <MenuRow
-            icon={<Settings color={Colors.primary} size={18} />}
+            icon={<Settings color={colors.primary} size={18} />}
             label="Settings"
             onPress={() => router.push('/settings' as Href)}
+            styles={styles}
+            colors={colors}
           />
           <View style={styles.divider} />
           <MenuRow
-            icon={<HelpCircle color={Colors.primary} size={18} />}
+            icon={<HelpCircle color={colors.primary} size={18} />}
             label="Help & Support"
             onPress={() => router.push('/help-support' as Href)}
+            styles={styles}
+            colors={colors}
           />
           <View style={styles.divider} />
           <MenuRow
-            icon={<Info color={Colors.primary} size={18} />}
+            icon={<Info color={colors.primary} size={18} />}
             label="About Us"
             onPress={() => router.push('/about' as Href)}
+            styles={styles}
+            colors={colors}
           />
           <View style={styles.divider} />
           <MenuRow
-            icon={<Shield color={Colors.primary} size={18} />}
+            icon={<Shield color={colors.primary} size={18} />}
             label="Privacy Policy"
             onPress={() => router.push('/privacy' as Href)}
+            styles={styles}
+            colors={colors}
           />
           <View style={styles.divider} />
           <MenuRow
-            icon={<FileText color={Colors.primary} size={18} />}
+            icon={<FileText color={colors.primary} size={18} />}
             label="Terms of Service"
             onPress={() =>
               Alert.alert(
@@ -166,6 +178,8 @@ export default function ProfileScreen() {
                 'By using Raydo you agree to fair use of the platform and respectful behaviour with drivers.',
               )
             }
+            styles={styles}
+            colors={colors}
           />
         </View>
 
@@ -185,7 +199,7 @@ export default function ProfileScreen() {
             ])
           }
         >
-          <LogOut color={Colors.error} size={18} />
+          <LogOut color={colors.error} size={18} />
           <Text style={styles.logoutText}>Log out</Text>
         </TouchableOpacity>
 
@@ -199,24 +213,32 @@ function MenuRow({
   icon,
   label,
   onPress,
+  styles,
+  colors,
 }: {
   icon: React.ReactNode;
   label: string;
   onPress: () => void;
+  styles: ReturnType<typeof createStyles>;
+  colors: ReturnType<typeof useAppTheme>['colors'];
 }) {
   return (
     <TouchableOpacity style={styles.row} onPress={onPress} activeOpacity={0.85}>
       <View style={styles.iconBg}>{icon}</View>
       <Text style={styles.rowText}>{label}</Text>
-      <ChevronRight color={Colors.textLight} size={18} />
+      <ChevronRight color={colors.textLight} size={18} />
     </TouchableOpacity>
   );
 }
 
-const styles = StyleSheet.create({
+function createStyles(
+  colors: ReturnType<typeof useAppTheme>['colors'],
+  shadow: ReturnType<typeof useAppTheme>['shadow'],
+) {
+  return StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.background,
+    backgroundColor: colors.background,
   },
   scrollContent: {
     padding: 20,
@@ -225,12 +247,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 28,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
     letterSpacing: -0.4,
   },
   headerSub: {
     fontSize: 13,
-    color: Colors.textLight,
+    color: colors.textLight,
     fontWeight: '600',
     marginTop: 4,
     marginBottom: 18,
@@ -238,25 +260,25 @@ const styles = StyleSheet.create({
   profileCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: Colors.white,
+    backgroundColor: colors.surface,
     padding: 16,
     borderRadius: Radius.xl,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
-    ...Shadow.card,
+    borderColor: colors.border,
+    ...shadow.card,
   },
   avatar: {
     width: 64,
     height: 64,
     borderRadius: 22,
-    backgroundColor: Colors.primary,
+    backgroundColor: colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 14,
   },
   avatarText: {
-    color: Colors.accent,
+    color: colors.accent,
     fontSize: 20,
     fontWeight: '800',
   },
@@ -264,11 +286,11 @@ const styles = StyleSheet.create({
   name: {
     fontSize: 18,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
   },
   phone: {
     fontSize: 13,
-    color: Colors.textLight,
+    color: colors.textLight,
     marginTop: 2,
     fontWeight: '600',
   },
@@ -281,18 +303,18 @@ const styles = StyleSheet.create({
   ratingText: {
     fontSize: 12,
     fontWeight: '700',
-    color: Colors.textSecondary,
+    color: colors.textSecondary,
   },
   editBtn: {
     paddingHorizontal: 14,
     paddingVertical: 8,
-    backgroundColor: Colors.accentSoft,
+    backgroundColor: colors.accentSoft,
     borderRadius: Radius.full,
   },
   editText: {
     fontSize: 13,
     fontWeight: '800',
-    color: Colors.accentDark,
+    color: colors.accentDark,
   },
   statsRow: {
     flexDirection: 'row',
@@ -301,32 +323,32 @@ const styles = StyleSheet.create({
   },
   statBox: {
     flex: 1,
-    backgroundColor: Colors.white,
+    backgroundColor: colors.surface,
     borderRadius: Radius.lg,
     paddingVertical: 14,
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: Colors.border,
+    borderColor: colors.border,
   },
   statValue: {
     fontSize: 16,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
   },
   statLabel: {
     fontSize: 11,
-    color: Colors.textLight,
+    color: colors.textLight,
     marginTop: 4,
     fontWeight: '600',
   },
   section: {
-    backgroundColor: Colors.white,
+    backgroundColor: colors.surface,
     borderRadius: Radius.xl,
     padding: 14,
     marginBottom: 14,
     borderWidth: 1,
-    borderColor: Colors.border,
-    ...Shadow.soft,
+    borderColor: colors.border,
+    ...shadow.soft,
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -337,12 +359,12 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 15,
     fontWeight: '800',
-    color: Colors.text,
+    color: colors.text,
   },
   seeAll: {
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.accentDark,
+    color: colors.accentDark,
   },
   row: {
     flexDirection: 'row',
@@ -353,7 +375,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 12,
-    backgroundColor: Colors.primaryMuted,
+    backgroundColor: colors.primaryMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -361,7 +383,7 @@ const styles = StyleSheet.create({
   rowText: {
     flex: 1,
     fontSize: 15,
-    color: Colors.text,
+    color: colors.text,
     fontWeight: '600',
   },
   rideRow: {
@@ -373,7 +395,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 19,
-    backgroundColor: Colors.surfaceMuted,
+    backgroundColor: colors.surfaceMuted,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -385,22 +407,22 @@ const styles = StyleSheet.create({
   rideDest: {
     fontSize: 14,
     fontWeight: '700',
-    color: Colors.text,
+    color: colors.text,
     marginBottom: 2,
   },
   rideMeta: {
     fontSize: 12,
-    color: Colors.textLight,
+    color: colors.textLight,
     fontWeight: '500',
   },
   rideFare: {
     fontSize: 14,
     fontWeight: '800',
-    color: Colors.primary,
+    color: colors.primary,
   },
   divider: {
     height: 1,
-    backgroundColor: Colors.border,
+    backgroundColor: colors.border,
     marginVertical: 2,
   },
   logoutBtn: {
@@ -408,22 +430,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: Colors.white,
+    backgroundColor: colors.surface,
     paddingVertical: 16,
     borderRadius: Radius.xl,
     borderWidth: 1.5,
-    borderColor: Colors.errorSoft,
+    borderColor: colors.errorSoft,
     marginBottom: 14,
   },
+
   logoutText: {
-    color: Colors.error,
+    color: colors.error,
     fontSize: 15,
     fontWeight: '800',
   },
   version: {
     textAlign: 'center',
-    color: Colors.textLight,
+    color: colors.textLight,
     fontSize: 12,
     fontWeight: '600',
   },
-});
+  });
+}
