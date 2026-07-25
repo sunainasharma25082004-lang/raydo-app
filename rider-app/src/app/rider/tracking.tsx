@@ -8,35 +8,11 @@ import {
   Platform,
   ActivityIndicator,
   Alert,
-  Linking,
 } from 'react-native';
-import DummyMap from '@/components/DummyMap';
-import { Region } from 'react-native-maps';
+import MapView, { Marker, Polyline, Region, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
-import { Phone, ShieldAlert, RefreshCw, MessageCircle } from 'lucide-react-native';
-
-/** Open native dial pad with this number (India-friendly). */
-function openDialPad(raw?: string | null, label = 'Number') {
-  if (!raw || !String(raw).trim()) {
-    Alert.alert(`${label} unavailable`, 'Phone number not available yet.');
-    return;
-  }
-  const digits = String(raw).replace(/\D/g, '');
-  if (digits.length < 8) {
-    Alert.alert('Invalid number', String(raw));
-    return;
-  }
-  // Prefer +91 for 10-digit Indian mobiles
-  let tel = digits;
-  if (digits.length === 10) tel = `+91${digits}`;
-  else if (digits.startsWith('91') && digits.length === 12) tel = `+${digits}`;
-  else if (digits.length > 10) tel = `+${digits}`;
-
-  Linking.openURL(`tel:${tel}`).catch(() => {
-    Alert.alert('Could not open dialer', tel);
-  });
-}
+import { Phone, ShieldAlert, Navigation, RefreshCw } from 'lucide-react-native';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -46,21 +22,16 @@ import Animated, {
   withDelay,
 } from 'react-native-reanimated';
 import { useCurrentLocation } from '@/hooks/use-current-location';
-import { LiveRide, NearbyDriver, riderApi, SOCKET_URL, API_BASE } from '@/lib/api';
-import { getRiderSession } from '@/lib/session';
+import { LiveRide, riderApi, SOCKET_URL, API_BASE } from '@/lib/api';
 import { io, Socket } from 'socket.io-client';
-import {
-  notifyDriverAssigned,
-  setupRiderNotifications,
-} from '@/lib/notifications';
 
 const { height } = Dimensions.get('window');
 
 const MATCH_LABEL: Record<string, string> = {
-  Scooty: 'nearest Scooty / Bike partners (max 10)',
-  Bike: 'nearest Bike / Scooty partners (max 10)',
-  Auto: 'nearest Auto partners only (max 10)',
-  Car: 'nearest Car partners only (max 10)',
+  Scooty: 'nearby Scooty / Bike partners',
+  Bike: 'nearby Bike / Scooty partners',
+  Auto: 'nearby Auto partners only',
+  Car: 'nearby Car partners only',
 };
 
 function haversineKm(
@@ -108,17 +79,9 @@ export default function TrackingScreen() {
   const [creating, setCreating] = useState(false);
   const [routeCoords, setRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
   const [routeEtaMin, setRouteEtaMin] = useState<number | null>(null);
-  const [nearbyDrivers, setNearbyDrivers] = useState<NearbyDriver[]>([]);
-  const [matchInfo, setMatchInfo] = useState<{ radiusKm?: number; message?: string }>({});
-  const [pickupEta, setPickupEta] = useState<number | null>(null);
-  const [chatOpen, setChatOpen] = useState(false);
-  const [waNote, setWaNote] = useState('');
-
-  useEffect(() => {
-    setupRiderNotifications();
-  }, []);
 
   const socketRef = useRef<Socket | null>(null);
+  const mapRef = useRef<MapView>(null);
   const rideCreatedRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -149,41 +112,13 @@ export default function TrackingScreen() {
       socket.emit('join_ride', created.id);
     });
 
-    socket.on(
-      'ride_accepted',
-      (payload: {
-        ride: LiveRide;
-        chatEnabled?: boolean;
-        pickupEtaMinutes?: number | null;
-        whatsappNotify?: { sent?: boolean; channel?: string; message?: string };
-      }) => {
-        setRide(payload.ride);
-        setStatus('assigned');
-        setChatOpen(payload.chatEnabled !== false && payload.ride?.chatEnabled !== false);
-        if (payload.pickupEtaMinutes != null) setPickupEta(payload.pickupEtaMinutes);
-        else if (payload.ride?.pickupEtaMinutes != null) setPickupEta(payload.ride.pickupEtaMinutes);
-        if (payload.whatsappNotify?.sent) {
-          setWaNote('WhatsApp sent: driver is on the way with ETA');
-        } else if (payload.whatsappNotify?.message) {
-          setWaNote('Driver assigned — open chat for updates (WhatsApp provider optional)');
-        }
-        const dName = payload.ride?.driverSnapshot?.name || 'Your driver';
-        const vType =
-          payload.ride?.driverSnapshot?.vehicle?.type || payload.ride?.vehicleType || '';
-        notifyDriverAssigned({
-          driverName: dName,
-          etaMinutes: payload.pickupEtaMinutes ?? payload.ride?.pickupEtaMinutes,
-          vehicle: vType,
-        });
-        applyDriverLoc(
-          payload.ride.driverLocation?.lat ?? payload.ride.driverSnapshot?.location?.lat,
-          payload.ride.driverLocation?.lng ?? payload.ride.driverSnapshot?.location?.lng,
-        );
-      },
-    );
-
-    socket.on('chat_closed', () => {
-      setChatOpen(false);
+    socket.on('ride_accepted', (payload: { ride: LiveRide }) => {
+      setRide(payload.ride);
+      setStatus('assigned');
+      applyDriverLoc(
+        payload.ride.driverLocation?.lat ?? payload.ride.driverSnapshot?.location?.lat,
+        payload.ride.driverLocation?.lng ?? payload.ride.driverSnapshot?.location?.lng,
+      );
     });
 
     socket.on(
@@ -198,8 +133,6 @@ export default function TrackingScreen() {
 
     socket.on('ride_status_updated', (payload: { ride: LiveRide }) => {
       setRide(payload.ride);
-      if (payload.ride?.chatEnabled === false) setChatOpen(false);
-      else if (['Accepted', 'Arrived'].includes(payload.ride?.status || '')) setChatOpen(true);
       applyDriverLoc(payload.ride.driverLocation?.lat, payload.ride.driverLocation?.lng);
     });
 
@@ -219,16 +152,10 @@ export default function TrackingScreen() {
         if (g.ride.driverId) {
           setStatus('assigned');
           applyDriverLoc(g.ride.driverLocation?.lat, g.ride.driverLocation?.lng);
-          if (g.ride.pickupEtaMinutes != null) setPickupEta(g.ride.pickupEtaMinutes);
-          if (g.ride.chatEnabled === false) setChatOpen(false);
-          else if (['Accepted', 'Arrived'].includes(g.ride.status)) setChatOpen(true);
         }
         if (g.ride.status === 'Completed') {
           if (pollRef.current) clearInterval(pollRef.current);
-          router.replace({
-            pathname: '/rider/payment',
-            params: { rideId: created.id },
-          });
+          router.replace('/rider/payment');
         }
       } catch {
         /* ignore transient errors */
@@ -264,14 +191,11 @@ export default function TrackingScreen() {
       setStatus('finding');
       setError('');
       try {
-        const session = await getRiderSession();
-        const riderPhone = session.phone || '';
         const fareNum =
           Number(String(params.fare || '').replace(/[^\d]/g, '')) || undefined;
         const res = await riderApi.createRide({
           riderId,
           riderName: 'Rider',
-          riderPhone,
           pickup: pickup || address || 'Current location',
           drop,
           pickupLat: lat,
@@ -282,25 +206,6 @@ export default function TrackingScreen() {
         });
         if (cancelled) return;
         setRide(res.ride);
-        const nearest =
-          res.matchedDrivers ||
-          res.ride?.matchedDriversSnapshot ||
-          [];
-        setNearbyDrivers(nearest);
-        setMatchInfo({
-          radiusKm: res.matchRule?.radiusKm ?? res.ride?.matchRadiusKm ?? 12,
-          message: res.message,
-        });
-        if (!nearest.length) {
-          setStatus('error');
-          setError(
-            res.message ||
-              `No online ${vehicleName} drivers near you (within ${
-                res.matchRule?.radiusKm ?? 12
-              } km). Try again when partners are online nearby.`,
-          );
-          return;
-        }
         startSocketAndPoll(res.ride);
       } catch (e: any) {
         rideCreatedRef.current = false;
@@ -345,9 +250,20 @@ export default function TrackingScreen() {
     return () => clearInterval(t);
   }, [ride?.id, coords?.latitude, coords?.longitude]);
 
-  // Live route ETA from Geoapify when driver moves
+  // Animate map when driver moves + live route from Geoapify
   useEffect(() => {
-    if (!driverLoc || !coords) return;
+    if (!driverLoc || !mapRef.current) return;
+    mapRef.current.animateToRegion(
+      {
+        latitude: driverLoc.lat,
+        longitude: driverLoc.lng,
+        latitudeDelta: 0.02,
+        longitudeDelta: 0.02,
+      },
+      500,
+    );
+
+    if (!coords) return;
     let cancelled = false;
     (async () => {
       try {
@@ -443,8 +359,6 @@ export default function TrackingScreen() {
     rideCreatedRef.current = false;
     setRide(null);
     setDriverLoc(null);
-    setNearbyDrivers([]);
-    setMatchInfo({});
     setError('');
     setStatus('locating');
     refresh();
@@ -471,47 +385,18 @@ export default function TrackingScreen() {
                 : `Creating your ride…`}
           </Text>
           <Text style={styles.findingSubtitle}>
-            {MATCH_LABEL[vehicleType] || 'Matching nearest partners'}
+            {MATCH_LABEL[vehicleType] || 'Matching partners'}
           </Text>
           {coords ? (
             <Text style={styles.gpsLine}>
               Your GPS: {coords.latitude.toFixed(5)}, {coords.longitude.toFixed(5)}
             </Text>
           ) : null}
-          {matchInfo.radiusKm != null ? (
-            <Text style={styles.gpsLine}>
-              Searching within {matchInfo.radiusKm} km · max 10 nearest
-            </Text>
-          ) : null}
           {ride ? (
             <Text style={styles.gpsLine}>
-              Ride ID: {ride.id.slice(0, 10)}… — waiting for a nearby driver
+              Ride ID: {ride.id.slice(0, 10)}… — waiting for driver to accept
             </Text>
           ) : null}
-
-          {nearbyDrivers.length > 0 ? (
-            <View style={styles.nearbyBox}>
-              <Text style={styles.nearbyTitle}>
-                Nearby drivers ({nearbyDrivers.length}/10)
-              </Text>
-              {nearbyDrivers.slice(0, 10).map((d, i) => (
-                <View key={d.id || String(i)} style={styles.nearbyRow}>
-                  <Text style={styles.nearbyRank}>#{i + 1}</Text>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.nearbyName}>{d.name || 'Partner'}</Text>
-                    <Text style={styles.nearbyMeta}>
-                      {d.vehicle?.type || vehicleName}
-                      {d.rating != null ? ` · ★ ${d.rating}` : ''}
-                    </Text>
-                  </View>
-                  <Text style={styles.nearbyDist}>
-                    {d.distanceKm != null ? `${d.distanceKm.toFixed(1)} km` : '—'}
-                  </Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-
           <Text style={styles.apiHint}>{API_BASE}</Text>
         </View>
         <TouchableOpacity style={styles.cancelLink} onPress={cancel}>
@@ -539,34 +424,51 @@ export default function TrackingScreen() {
 
   // Assigned — live map
   const d = ride?.driverSnapshot;
-  const chatAllowed =
-    chatOpen ||
-    (ride?.chatEnabled !== false && ['Accepted', 'Arrived'].includes(ride?.status || ''));
-  const displayEta = pickupEta ?? etaMin;
-
-  const openChat = () => {
-    if (!ride?.id) return;
-    router.push({
-      pathname: '/rider/chat',
-      params: {
-        rideId: ride.id,
-        riderId,
-        driverName: d?.name || 'Driver',
-      },
-    });
-  };
 
   return (
     <View style={styles.container}>
       <View style={styles.mapContainer}>
         {region ? (
-          <DummyMap
+          <MapView
+            ref={mapRef}
+            provider={PROVIDER_GOOGLE}
             style={styles.map}
-            latitude={coords?.latitude}
-            longitude={coords?.longitude}
-            address={address || undefined}
-            driver={!!driverLoc}
-          />
+            initialRegion={region}
+            showsUserLocation
+            showsMyLocationButton={false}
+            loadingEnabled
+          >
+            {coords ? (
+              <Marker
+                coordinate={{ latitude: coords.latitude, longitude: coords.longitude }}
+                title="You (rider)"
+                description={address}
+                pinColor="#C9A25D"
+              >
+                <View style={styles.youPin}>
+                  <View style={styles.youDot} />
+                </View>
+              </Marker>
+            ) : null}
+            {driverLoc ? (
+              <Marker
+                coordinate={{ latitude: driverLoc.lat, longitude: driverLoc.lng }}
+                title={d?.name || 'Driver'}
+                description="Live location"
+              >
+                <View style={styles.driverPin}>
+                  <Navigation color={Colors.white} size={14} />
+                </View>
+              </Marker>
+            ) : null}
+            {routeCoords.length > 1 ? (
+              <Polyline
+                coordinates={routeCoords}
+                strokeColor={Colors.primary}
+                strokeWidth={4}
+              />
+            ) : null}
+          </MapView>
         ) : (
           <View style={styles.mapFallback}>
             <ActivityIndicator color={Colors.primary} />
@@ -582,35 +484,18 @@ export default function TrackingScreen() {
         <ShieldAlert color={Colors.error} size={24} />
       </TouchableOpacity>
 
-      {chatAllowed ? (
-        <TouchableOpacity style={styles.chatFab} onPress={openChat} activeOpacity={0.9}>
-          <MessageCircle color={Colors.white} size={22} />
-          <Text style={styles.chatFabText}>Chat</Text>
-        </TouchableOpacity>
-      ) : null}
-
       <View style={styles.sheet}>
         <View style={styles.dragHandle} />
 
         <View style={styles.etaHeader}>
           <Text style={styles.etaTitle}>
-            {driverLoc ? 'Driver coming to you' : 'Waiting for driver GPS…'}
+            {driverLoc ? 'Driver live on map' : 'Waiting for driver GPS…'}
           </Text>
           <View style={{ flexDirection: 'row', alignItems: 'baseline' }}>
-            <Text style={styles.etaNumber}>{displayEta ?? '—'}</Text>
+            <Text style={styles.etaNumber}>{etaMin ?? '—'}</Text>
             <Text style={styles.etaMin}> min</Text>
           </View>
         </View>
-
-        {waNote ? <Text style={styles.waNote}>{waNote}</Text> : null}
-        {chatAllowed ? (
-          <TouchableOpacity style={styles.chatBanner} onPress={openChat}>
-            <MessageCircle color={Colors.primary} size={18} />
-            <Text style={styles.chatBannerText}>Chat with driver (closes after pickup)</Text>
-          </TouchableOpacity>
-        ) : ride?.status === 'In_Progress' || ride?.status === 'Completed' ? (
-          <Text style={styles.chatClosedNote}>Chat closed after pickup</Text>
-        ) : null}
 
         {driverLoc ? (
           <Text style={styles.liveLine}>
@@ -648,9 +533,7 @@ export default function TrackingScreen() {
           </View>
           <TouchableOpacity
             style={styles.callBtn}
-            onPress={() => openDialPad(d?.phone, 'Driver number')}
-            accessibilityRole="button"
-            accessibilityLabel="Call driver"
+            onPress={() => d?.phone && Alert.alert('Call driver', String(d.phone))}
           >
             <Phone color={Colors.primary} size={20} />
           </TouchableOpacity>
@@ -704,39 +587,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center',
   },
-  nearbyBox: {
-    marginTop: 16,
-    width: '100%',
-    maxWidth: 340,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 16,
-    padding: 12,
-    gap: 8,
-  },
-  nearbyTitle: {
-    color: Colors.accent,
-    fontWeight: '800',
-    fontSize: 13,
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  nearbyRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 6,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: 'rgba(255,255,255,0.15)',
-  },
-  nearbyRank: {
-    color: Colors.accent,
-    fontWeight: '800',
-    width: 28,
-    fontSize: 12,
-  },
-  nearbyName: { color: Colors.white, fontWeight: '700', fontSize: 14 },
-  nearbyMeta: { color: 'rgba(255,255,255,0.65)', fontSize: 11, fontWeight: '600', marginTop: 1 },
-  nearbyDist: { color: Colors.accent, fontWeight: '800', fontSize: 13 },
   findingSubtitle: {
     color: 'rgba(255,255,255,0.75)',
     textAlign: 'center',
@@ -791,43 +641,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 2,
     borderColor: '#fff',
-  },
-  chatFab: {
-    position: 'absolute',
-    right: 16,
-    top: height * 0.32,
-    backgroundColor: Colors.primary,
-    borderRadius: 24,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    zIndex: 20,
-    elevation: 6,
-  },
-  chatFabText: { color: Colors.white, fontWeight: '800', fontSize: 13 },
-  chatBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: Colors.primaryMuted || '#E8ECF4',
-    padding: 12,
-    borderRadius: 12,
-    marginBottom: 8,
-  },
-  chatBannerText: { flex: 1, color: Colors.primary, fontWeight: '700', fontSize: 13 },
-  chatClosedNote: {
-    color: Colors.error,
-    fontWeight: '700',
-    fontSize: 12,
-    marginBottom: 6,
-  },
-  waNote: {
-    color: Colors.success,
-    fontWeight: '700',
-    fontSize: 12,
-    marginBottom: 6,
   },
   sosButton: {
     position: 'absolute',

@@ -17,6 +17,7 @@ router.post('/rides', c.createRide);
 router.get('/rides/:id', c.getRide);
 router.post('/rides/:id/cancel', c.cancelRide);
 router.post('/rides/rider-location', c.pushRiderLocation);
+router.get('/nearby-drivers', c.getNearbyDrivers);
 
 // In-ride chat (open only Accepted/Arrived — closed after pickup)
 router.get('/rides/:id/chat', c.getChat);

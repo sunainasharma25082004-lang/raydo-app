@@ -1,13 +1,28 @@
-import { Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { Stack, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StyleSheet } from 'react-native';
 import { DriverProvider } from '@/context/DriverContext';
 import { SessionProvider } from '@/context/SessionContext';
 import { ThemeProvider, useAppTheme } from '@/context/ThemeContext';
+import {
+  registerDriverNotificationTapHandler,
+  setupDriverNotifications,
+} from '@/lib/notifications';
 
 function RootNav() {
   const { isDark, colors } = useAppTheme();
+  const router = useRouter();
+
+  useEffect(() => {
+    setupDriverNotifications();
+    const unsub = registerDriverNotificationTapHandler(router);
+    return () => {
+      unsub?.();
+    };
+  }, [router]);
+
   return (
     <>
       <StatusBar style={isDark ? 'light' : 'dark'} />

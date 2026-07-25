@@ -1,7 +1,8 @@
-import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { MapPin, Navigation } from 'lucide-react-native';
-import { Colors, Radius } from '@/constants/Colors';
+import { Colors, Radius, Shadow } from '@/constants/Colors';
 
 type Props = {
   label?: string;
@@ -9,6 +10,7 @@ type Props = {
   showRoute?: boolean;
   compact?: boolean;
   coords?: { latitude: number; longitude: number } | null;
+  destCoords?: { latitude: number; longitude: number } | null;
   loading?: boolean;
 };
 
@@ -18,40 +20,79 @@ export function MapCanvas({
   showRoute,
   compact,
   coords,
+  destCoords,
   loading,
 }: Props) {
-  const gpsLine = coords
-    ? `${coords.latitude.toFixed(5)}, ${coords.longitude.toFixed(5)}`
-    : loading
-      ? 'Reading GPS…'
-      : 'Waiting for GPS';
+  const [showMap, setShowMap] = useState(false);
+
+  useEffect(() => {
+    // Delay map mount slightly to avoid Xiaomi AppState crash
+    const t = setTimeout(() => setShowMap(true), 800);
+    return () => clearTimeout(t);
+  }, []);
 
   return (
     <View style={[styles.wrap, compact && styles.compact]}>
-      <View style={styles.grid} />
-      <View style={styles.roadH} />
-      <View style={styles.roadV} />
-      {showRoute ? <View style={styles.route} /> : null}
+      {showMap && coords ? (
+        <MapView
+          provider={PROVIDER_GOOGLE}
+          style={StyleSheet.absoluteFill}
+          showsUserLocation={false}
+          showsMyLocationButton={false}
+          showsIndoors={false}
+          toolbarEnabled={false}
+          pitchEnabled={false}
+          initialRegion={{
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          }}
+          region={{
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            latitudeDelta: 0.005,
+            longitudeDelta: 0.005,
+          }}
+        >
+          <Marker
+            coordinate={{
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+            }}
+            anchor={{ x: 0.5, y: 0.5 }}
+          >
+             <View style={styles.pinPulse} />
+             <View style={styles.pin}>
+               <Navigation color={Colors.white} size={14} fill={Colors.white} />
+             </View>
+          </Marker>
 
-      <View style={styles.pinWrap}>
-        <View style={styles.pinPulse} />
-        <View style={styles.pin}>
-          <Navigation color={Colors.white} size={16} fill={Colors.white} />
+          {showRoute && destCoords && (
+             <Marker
+                coordinate={{
+                  latitude: destCoords.latitude,
+                  longitude: destCoords.longitude,
+                }}
+             >
+                <View style={styles.destPin}>
+                   <MapPin color={Colors.accent} size={28} fill={Colors.white} />
+                </View>
+             </Marker>
+          )}
+        </MapView>
+      ) : (
+        <View style={styles.loadingWrap}>
+          <ActivityIndicator size="large" color={Colors.primary} />
         </View>
-      </View>
+      )}
 
-      {showRoute ? (
-        <View style={styles.destPin}>
-          <MapPin color={Colors.accent} size={22} fill={Colors.accentSoft} />
-        </View>
-      ) : null}
-
+      {/* Floating Badge overlay */}
       <View style={styles.badge}>
         <Text style={styles.badgeTitle}>{label}</Text>
         <Text style={styles.badgeSub} numberOfLines={2}>
           {subtitle}
         </Text>
-        <Text style={styles.gps}>{gpsLine}</Text>
       </View>
     </View>
   );
@@ -68,67 +109,34 @@ const styles = StyleSheet.create({
     minHeight: 180,
     borderRadius: Radius.lg,
   },
-  grid: {
-    ...StyleSheet.absoluteFill,
-    opacity: 0.35,
-    backgroundColor: 'transparent',
-    borderWidth: 0,
-  },
-  roadH: {
-    position: 'absolute',
-    top: '48%',
-    left: 0,
-    right: 0,
-    height: 10,
-    backgroundColor: '#CBD5E1',
-  },
-  roadV: {
-    position: 'absolute',
-    left: '42%',
-    top: 0,
-    bottom: 0,
-    width: 10,
-    backgroundColor: '#CBD5E1',
-  },
-  route: {
-    position: 'absolute',
-    left: '44%',
-    top: '30%',
-    width: 4,
-    height: '38%',
-    backgroundColor: Colors.primary,
-    borderRadius: 4,
-    transform: [{ rotate: '28deg' }],
-  },
-  pinWrap: {
-    position: 'absolute',
-    top: '44%',
-    left: '40%',
+  loadingWrap: {
+    ...StyleSheet.absoluteFillObject,
     alignItems: 'center',
     justifyContent: 'center',
   },
   pinPulse: {
     position: 'absolute',
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    top: -10,
+    left: -10,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: Colors.primary,
-    opacity: 0.15,
+    opacity: 0.25,
   },
   pin: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 3,
+    borderWidth: 2,
     borderColor: Colors.white,
   },
   destPin: {
-    position: 'absolute',
-    top: '28%',
-    right: '22%',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   badge: {
     position: 'absolute',
@@ -141,6 +149,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     maxWidth: '70%',
+    ...Shadow.sm,
   },
   badgeTitle: {
     fontSize: 13,
@@ -151,11 +160,5 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: Colors.textLight,
     marginTop: 2,
-  },
-  gps: {
-    fontSize: 10,
-    color: Colors.primary,
-    marginTop: 4,
-    fontWeight: '700',
   },
 });

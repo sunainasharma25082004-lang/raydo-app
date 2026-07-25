@@ -247,6 +247,13 @@ export default function TripScreen() {
           subtitle={address || 'Sharing live GPS with rider'}
           showRoute
           coords={coords}
+          destCoords={
+            (tripStatus === 'to_pickup' || tripStatus === 'waiting') && liveRide?.pickupLat
+              ? { latitude: liveRide.pickupLat, longitude: liveRide.pickupLng }
+              : tripStatus === 'in_progress' && liveRide?.dropLat
+              ? { latitude: liveRide.dropLat, longitude: liveRide.dropLng }
+              : undefined
+          }
           loading={!coords}
         />
         <View style={styles.topChip}>
@@ -318,7 +325,7 @@ export default function TripScreen() {
               }
               if (!liveRide?.id) return;
               router.push({
-                pathname: '/driver/chat',
+                pathname: '/driver/chat' as any,
                 params: {
                   rideId: liveRide.id,
                   riderName,

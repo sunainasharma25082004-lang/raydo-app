@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Alert, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, Linking } from 'react-native';
-import DummyMap from '@/components/DummyMap';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import { io, Socket } from 'socket.io-client';
 import axios from 'axios';
@@ -110,17 +110,7 @@ export default function TrackScreen() {
   };
 
   const handleCall = () => {
-    const digits = String(driverPhone || '').replace(/\D/g, '');
-    if (digits.length < 8) return;
-    const tel =
-      digits.length === 10
-        ? `+91${digits}`
-        : digits.startsWith('91') && digits.length === 12
-          ? `+${digits}`
-          : digits.length > 10
-            ? `+${digits}`
-            : digits;
-    Linking.openURL(`tel:${tel}`).catch(() => {});
+    Linking.openURL(`tel:${driverPhone}`);
   };
 
   const handleSendChat = () => {
@@ -142,12 +132,21 @@ export default function TrackScreen() {
 
   return (
     <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <DummyMap
-        style={styles.map}
-        latitude={location.coords.latitude}
-        longitude={location.coords.longitude}
-        driver={!!driverLocation}
-      />
+      <MapView style={styles.map}
+        provider={PROVIDER_GOOGLE}
+        initialRegion={{ latitude: location.coords.latitude, longitude: location.coords.longitude, latitudeDelta: 0.05, longitudeDelta: 0.05 }}
+      >
+        <Marker coordinate={{ latitude: location.coords.latitude, longitude: location.coords.longitude }} title="You">
+          <View style={styles.riderMarker}><MapPin color="white" size={20} /></View>
+        </Marker>
+        {driverLocation && (
+          <Marker coordinate={{ latitude: driverLocation.lat, longitude: driverLocation.lng }} title="Driver">
+            <View style={styles.driverMarker}><Navigation color="white" size={20} /></View>
+          </Marker>
+        )}
+        {routeCoords.length > 0 && <Polyline coordinates={routeCoords} strokeColor={Colors.accent} strokeWidth={4} />}
+      </MapView>
+
       <View style={styles.bottomSheet}>
         <View style={styles.infoRow}>
           <View>

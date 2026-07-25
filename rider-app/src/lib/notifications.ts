@@ -1,9 +1,10 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 
 /**
- * Expo Go (SDK 53+) throws if expo-notifications is imported on Android.
- * Use a development build for real push; in Expo Go we no-op safely.
+ * Expo Go (SDK 53+) cannot use expo-notifications on Android.
+ * Dev builds: local notifications + tap opens the right screen.
  */
 const isExpoGo = Constants.appOwnership === 'expo';
 
@@ -12,13 +13,20 @@ type NotificationsModule = typeof import('expo-notifications');
 let Notifications: NotificationsModule | null = null;
 let loadAttempted = false;
 let configured = false;
+let responseSub: { remove: () => void } | null = null;
+
+export type NotifyPayload = {
+  type: string;
+  href?: string;
+  rideId?: string;
+  [key: string]: unknown;
+};
 
 function getNotifications(): NotificationsModule | null {
   if (isExpoGo) return null;
   if (loadAttempted) return Notifications;
   loadAttempted = true;
   try {
-    // Lazy require — never top-level import (crashes Expo Go)
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     Notifications = require('expo-notifications') as NotificationsModule;
   } catch (e) {
@@ -26,6 +34,10 @@ function getNotifications(): NotificationsModule | null {
     Notifications = null;
   }
   return Notifications;
+}
+
+export function isNotificationsSupported() {
+  return !isExpoGo && !!getNotifications();
 }
 
 export async function setupRiderNotifications() {
@@ -68,32 +80,125 @@ export async function setupRiderNotifications() {
   }
 }
 
+/**
+ * Tap on notification → open tracking / chat / home.
+ * Call once from root layout.
+ */
+export function registerRiderNotificationTapHandler(router: any) {
+  const N = getNotifications();
+  if (!N) return () => {};
+
+  try {
+    responseSub?.remove();
+  } catch {
+    /* ignore */
+  }
+
+  const openFromData = (data: NotifyPayload | undefined | null) => {
+    if (!data || typeof data !== 'object') {
+      router.push('/(tabs)/home' as any);
+      return;
+    }
+    const href = String(data.href || '');
+    const type = String(data.type || '');
+    const rideId = data.rideId ? String(data.rideId) : '';
+
+    if (href.startsWith('/')) {
+      if (rideId && href.includes('tracking')) {
+        router.push({ pathname: href as any, params: { rideId } });
+      } else if (rideId && href.includes('chat')) {
+        router.push({
+          pathname: '/rider/chat' as any,
+          params: { rideId, riderId: String(data.riderId || ''), driverName: String(data.driverName || 'Driver') },
+        });
+      } else {
+        router.push(href as any);
+      }
+      return;
+    }
+
+    if (type === 'driver_assigned' || type === 'ride_update') {
+      if (rideId) {
+        router.push({
+          pathname: '/rider/tracking' as any,
+          params: { rideId },
+        });
+      } else {
+        router.push('/(tabs)/home' as any);
+      }
+      return;
+    }
+    if (type === 'chat' && rideId) {
+      router.push({
+        pathname: '/rider/chat' as any,
+        params: {
+          rideId,
+          riderId: String(data.riderId || ''),
+          driverName: String(data.driverName || 'Driver'),
+        },
+      });
+      return;
+    }
+    router.push('/(tabs)/home' as any);
+  };
+
+  responseSub = N.addNotificationResponseReceivedListener((response) => {
+    try {
+      const data = response?.notification?.request?.content?.data as NotifyPayload;
+      setTimeout(() => openFromData(data), 300);
+    } catch (e) {
+      console.warn('[Notifications] tap handler failed', e);
+    }
+  });
+
+  N.getLastNotificationResponseAsync?.()
+    .then((last) => {
+      if (!last) return;
+      const data = last.notification?.request?.content?.data as NotifyPayload;
+      setTimeout(() => openFromData(data), 500);
+    })
+    .catch(() => {});
+
+  return () => {
+    try {
+      responseSub?.remove();
+      responseSub = null;
+    } catch {
+      /* ignore */
+    }
+  };
+}
+
 export async function notifyDriverAssigned(opts: {
   driverName: string;
   etaMinutes?: number | null;
   vehicle?: string;
+  rideId?: string;
 }) {
   try {
     const N = getNotifications();
+    const eta = opts.etaMinutes != null ? ` · ETA ~${opts.etaMinutes} min` : '';
+    const title = 'Driver is on the way 🚗';
+    const body = `${opts.driverName}${opts.vehicle ? ` · ${opts.vehicle}` : ''}${eta}`;
+
     if (!N) {
-      // Expo Go fallback — console only (UI still works)
-      console.log(
-        '[Notify]',
-        `Driver on the way: ${opts.driverName}`,
-        opts.etaMinutes != null ? `ETA ~${opts.etaMinutes}m` : '',
-      );
+      console.log('[Notify]', title, body);
       return;
     }
     const ok = await setupRiderNotifications();
     if (!ok) return;
 
-    const eta = opts.etaMinutes != null ? ` · ETA ~${opts.etaMinutes} min` : '';
     await N.scheduleNotificationAsync({
       content: {
-        title: 'Driver is on the way 🚗',
-        body: `${opts.driverName}${opts.vehicle ? ` · ${opts.vehicle}` : ''}${eta}`,
+        title,
+        body,
         sound: true,
-        data: { type: 'driver_assigned' },
+        data: {
+          type: 'driver_assigned',
+          href: '/rider/tracking',
+          rideId: opts.rideId || '',
+          driverName: opts.driverName,
+        } satisfies NotifyPayload,
         ...(Platform.OS === 'android' ? { channelId: 'rides' } : {}),
       },
       trigger: null,
@@ -103,7 +208,11 @@ export async function notifyDriverAssigned(opts: {
   }
 }
 
-export async function notifyRider(title: string, body: string) {
+export async function notifyRider(
+  title: string,
+  body: string,
+  data?: Partial<NotifyPayload>,
+) {
   try {
     const N = getNotifications();
     if (!N) {
@@ -117,6 +226,12 @@ export async function notifyRider(title: string, body: string) {
         title,
         body,
         sound: true,
+        data: {
+          type: data?.type || 'ride_update',
+          href: data?.href || '/(tabs)/home',
+          rideId: data?.rideId || '',
+          ...data,
+        } as NotifyPayload,
         ...(Platform.OS === 'android' ? { channelId: 'rides' } : {}),
       },
       trigger: null,

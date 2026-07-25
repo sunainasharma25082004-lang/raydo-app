@@ -144,6 +144,26 @@ export const riderApi = {
       `/api/map/reverse-geocode?lat=${lat}&lon=${lng}`,
     ),
 
+  /** Places near rider GPS (home "Nearby places") */
+  nearbyPlaces: (lat: number, lng: number, radiusMeters = 2500) =>
+    request<{
+      ok: boolean;
+      count: number;
+      places: {
+        id: string;
+        name: string;
+        address: string;
+        lat: number;
+        lng: number;
+        distanceM: number | null;
+        distanceKm: number | null;
+        emoji: string;
+        categories?: string[];
+      }[];
+    }>(
+      `/api/map/nearby-places?lat=${lat}&lon=${lng}&radiusMeters=${radiusMeters}&limit=12`,
+    ),
+
   autocomplete: (text: string, biasLat?: number, biasLng?: number) => {
     const params = new URLSearchParams({ text });
     if (biasLat != null && biasLng != null) {

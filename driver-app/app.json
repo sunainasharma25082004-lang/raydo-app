@@ -82,7 +82,8 @@
           "sounds": [],
           "defaultChannel": "rides"
         }
-      ]
+      ],
+      "react-native-maps"
     ],
     "experiments": {
       "typedRoutes": true,

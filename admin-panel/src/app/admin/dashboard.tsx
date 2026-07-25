@@ -396,7 +396,7 @@ export default function AdminDashboardScreen() {
           withdrawals.filter((w) => w.status === 'pending_admin').length,
       ),
       icon: Wallet,
-      color: Colors.accentDark || Colors.accent,
+      color: Colors.accent,
     },
   ];
 
@@ -1685,7 +1685,7 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 13,
     fontWeight: '700',
-    color: Colors.textSecondary,
+    color: Colors.textLight,
     backgroundColor: '#F7F4EF',
     padding: 10,
     borderRadius: 12,

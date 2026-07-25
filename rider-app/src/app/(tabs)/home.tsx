@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -13,7 +13,7 @@ import {
   AppState,
   type AppStateStatus,
 } from 'react-native';
-import DummyMap from '@/components/DummyMap';
+import MapView, { Marker, Region, PROVIDER_GOOGLE } from 'react-native-maps';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
@@ -30,8 +30,17 @@ import {
 } from 'lucide-react-native';
 import { useCurrentLocation } from '@/hooks/use-current-location';
 import { MapErrorBoundary } from '@/components/MapErrorBoundary';
+import { api } from '@/lib/api';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
+
+/** Fallback region (Bengaluru) until GPS is ready */
+const DEFAULT_REGION: Region = {
+  latitude: 12.9716,
+  longitude: 77.5946,
+  latitudeDelta: 0.04,
+  longitudeDelta: 0.04,
+};
 
 const TAB_BAR_H = Platform.OS === 'ios' ? 84 : 68;
 
@@ -78,6 +87,8 @@ const QUICK = [
 export default function RiderHomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const mapRef = useRef<MapView>(null);
+  const didCenterRef = useRef(false);
 
   // Home must NEVER open the permission dialog while MapView is loading.
   // Permission is requested on login screen. Here we only read GPS if already allowed.
@@ -89,9 +100,25 @@ export default function RiderHomeScreen() {
     startDelayMs: 1800,
   });
 
+  const [mapReady, setMapReady] = useState(false);
   const [showMap, setShowMap] = useState(false);
   const [mapKey, setMapKey] = useState(0);
   const [mapDisabled, setMapDisabled] = useState(false);
+  const [nearbyDrivers, setNearbyDrivers] = useState<any[]>([]);
+
+  // Poll for nearby drivers
+  useEffect(() => {
+    if (!coords) return;
+    const fetchDrivers = async () => {
+      try {
+        const res = await api.get(`/platform/nearby-drivers?lat=${coords.latitude}&lng=${coords.longitude}`);
+        if (res.data) setNearbyDrivers(res.data);
+      } catch (err) {}
+    };
+    fetchDrivers();
+    const interval = setInterval(fetchDrivers, 3000);
+    return () => clearInterval(interval);
+  }, [coords]);
 
   // Mount map only when app is active + delayed (permission Activity fully gone)
   useEffect(() => {
@@ -123,6 +150,29 @@ export default function RiderHomeScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mapDisabled]);
 
+  // When live GPS arrives → move map pointer
+  useEffect(() => {
+    if (!coords || !mapReady || !showMap) return;
+
+    const next: Region = {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      latitudeDelta: 0.01,
+      longitudeDelta: 0.01,
+    };
+
+    try {
+      if (!didCenterRef.current) {
+        didCenterRef.current = true;
+        mapRef.current?.animateToRegion(next, 500);
+      } else {
+        mapRef.current?.animateToRegion(next, 350);
+      }
+    } catch {
+      /* ignore animate failures */
+    }
+  }, [coords?.latitude, coords?.longitude, mapReady, showMap]);
+
   const goToMyLocation = useCallback(async () => {
     try {
       await refresh();
@@ -134,6 +184,8 @@ export default function RiderHomeScreen() {
   const retryMap = useCallback(() => {
     setMapDisabled(false);
     setShowMap(false);
+    setMapReady(false);
+    didCenterRef.current = false;
     setMapKey((k) => k + 1);
     setTimeout(() => setShowMap(true), MAP_MOUNT_DELAY_MS);
   }, []);
@@ -179,12 +231,61 @@ export default function RiderHomeScreen() {
           onRetry={retryMap}
           fallback={mapFallback}
         >
-          <DummyMap
+          <MapView
+            ref={mapRef}
+            provider={PROVIDER_GOOGLE}
             style={styles.map}
-            latitude={coords?.latitude}
-            longitude={coords?.longitude}
-            address={address || undefined}
-          />
+            initialRegion={
+              coords
+                ? {
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                    latitudeDelta: 0.02,
+                    longitudeDelta: 0.02,
+                  }
+                : DEFAULT_REGION
+            }
+            onMapReady={() => setMapReady(true)}
+            // If native map dies, user can continue with sheet UI
+            onMapLoaded={() => setMapReady(true)}
+            showsUserLocation={false}
+            showsMyLocationButton={false}
+            showsCompass={false}
+            showsBuildings={false}
+            showsTraffic={false}
+            showsIndoors={false}
+            loadingEnabled={false}
+            moveOnMarkerPress={false}
+            toolbarEnabled={false}
+            pitchEnabled={false}
+            rotateEnabled={false}
+            liteMode={false}
+          >
+              {coords ? (
+                <Marker
+                  coordinate={{
+                    latitude: coords.latitude,
+                    longitude: coords.longitude,
+                  }}
+                  title="You are here"
+                  description={address || 'Live location'}
+                  pinColor={Colors.primary}
+                />
+              ) : null}
+
+              {nearbyDrivers.map((d) => (
+                <Marker
+                  key={d.id}
+                  coordinate={{
+                    latitude: d.latitude,
+                    longitude: d.longitude,
+                  }}
+                  title={d.vehicleType}
+                  description="Nearby driver"
+                  pinColor={Colors.accentDark}
+                />
+              ))}
+            </MapView>
         </MapErrorBoundary>
       ) : (
         mapFallback

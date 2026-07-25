@@ -93,7 +93,6 @@ export default function EarningsScreen() {
     <Screen
       scroll
       contentStyle={styles.content}
-      // @ts-expect-error refresh via child
     >
       <Text style={styles.title}>Earnings</Text>
       <Text style={styles.sub}>Real wallet · weekly withdraw needs admin permission</Text>

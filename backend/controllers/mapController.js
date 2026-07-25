@@ -18,7 +18,7 @@ function ensureKey(res) {
     });
     return false;
   }
-  return true;
+  return true;0
 }
 
 /** Health check — is live map API working? */
@@ -179,6 +179,7 @@ exports.getAutocomplete = async (req, res) => {
 // 5. Places API
 exports.getPlaces = async (req, res) => {
   try {
+    if (!ensureKey(res)) return;
     const { categories, filter, limit } = req.query; // e.g., categories=commercial.supermarket, filter=rect:...
     if (!categories || !filter) return res.status(400).json({ message: 'Categories and filter are required' });
 
@@ -196,6 +197,108 @@ exports.getPlaces = async (req, res) => {
     res.status(500).json({ message: 'Error fetching places data' });
   }
 };
+
+/**
+ * Nearby popular places around rider GPS (for home "Recent / Nearby places").
+ * Query: lat, lon, radiusMeters (default 2500), limit (default 12)
+ */
+exports.getNearbyPlaces = async (req, res) => {
+  try {
+    if (!ensureKey(res)) return;
+    const lat = Number(req.query.lat);
+    const lon = Number(req.query.lon ?? req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+      return res.status(400).json({
+        message: 'lat and lon are required',
+        example: '/api/map/nearby-places?lat=28.65&lon=77.23',
+      });
+    }
+
+    const radius = Math.min(Math.max(Number(req.query.radiusMeters) || 2500, 500), 8000);
+    const limit = Math.min(Math.max(Number(req.query.limit) || 12, 4), 20);
+
+    // Popular ride destinations: malls, metro, cafe, restaurant, cinema, parks, hospitals
+    const categories = [
+      'commercial.shopping_mall',
+      'commercial.supermarket',
+      'catering.cafe',
+      'catering.restaurant',
+      'entertainment.cinema',
+      'public_transport',
+      'airport',
+      'healthcare.hospital',
+      'leisure.park',
+      'education.university',
+    ].join(',');
+
+    const response = await axios.get(`${BASE_URL}/v2/places`, {
+      params: {
+        categories,
+        filter: `circle:${lon},${lat},${radius}`,
+        bias: `proximity:${lon},${lat}`,
+        limit,
+        apiKey: API_KEY,
+      },
+      timeout: 12000,
+    });
+
+    const features = response.data?.features || [];
+    const places = features
+      .map((f) => {
+        const p = f.properties || {};
+        const cats = Array.isArray(p.categories) ? p.categories : [];
+        const distM = p.distance != null ? Number(p.distance) : null;
+        return {
+          id: p.place_id || p.osm_id || `${p.lat},${p.lon}`,
+          name: p.name || p.address_line1 || 'Place',
+          address:
+            p.address_line2 ||
+            p.formatted ||
+            [p.street, p.city].filter(Boolean).join(', ') ||
+            'Nearby',
+          lat: p.lat ?? f.geometry?.coordinates?.[1],
+          lng: p.lon ?? f.geometry?.coordinates?.[0],
+          distanceM: Number.isFinite(distM) ? distM : null,
+          distanceKm:
+            Number.isFinite(distM) ? Math.round((distM / 1000) * 100) / 100 : null,
+          categories: cats,
+          emoji: pickPlaceEmoji(cats, p.name),
+        };
+      })
+      .filter((p) => p.name && p.lat != null && p.lng != null)
+      .sort((a, b) => (a.distanceM ?? 9e9) - (b.distanceM ?? 9e9));
+
+    res.json({
+      ok: true,
+      center: { lat, lon },
+      radiusMeters: radius,
+      count: places.length,
+      places,
+    });
+  } catch (error) {
+    console.error('Error in Nearby Places API:', error?.response?.data || error.message);
+    res.status(502).json({
+      message: 'Error fetching nearby places',
+      detail: error?.response?.data || error.message,
+    });
+  }
+};
+
+function pickPlaceEmoji(categories = [], name = '') {
+  const c = categories.join(' ').toLowerCase();
+  const n = String(name).toLowerCase();
+  if (c.includes('airport') || n.includes('airport')) return '✈️';
+  if (c.includes('shopping_mall') || c.includes('supermarket') || n.includes('mall')) return '🛍️';
+  if (c.includes('metro') || c.includes('public_transport') || c.includes('railway')) return '🚇';
+  if (c.includes('cafe') || c.includes('coffee')) return '☕';
+  if (c.includes('restaurant') || c.includes('fast_food')) return '🍽️';
+  if (c.includes('cinema') || c.includes('theatre')) return '🎬';
+  if (c.includes('hospital') || c.includes('healthcare')) return '🏥';
+  if (c.includes('park') || c.includes('garden')) return '🌳';
+  if (c.includes('university') || c.includes('school')) return '🎓';
+  if (c.includes('hotel') || c.includes('accommodation')) return '🏨';
+  return '📍';
+}
 
 // 6. Places Details API
 exports.getPlaceDetails = async (req, res) => {

@@ -103,6 +103,7 @@ export default function DriverHomeScreen() {
       pickup: r.pickup || 'Pickup',
       vehicle: r.vehicleType,
       distanceKm: r.distanceKmFromDriver,
+      rideId: r.id,
     });
   };
 

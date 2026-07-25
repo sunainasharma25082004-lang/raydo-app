@@ -497,3 +497,30 @@ exports.adminPayments = (req, res) => {
   const status = req.query.status || 'all';
   res.json(platform.listPaymentsAdmin(status));
 };
+
+/** Mock nearby drivers for Rapido UX */
+exports.getNearbyDrivers = (req, res) => {
+  const lat = parseFloat(req.query.lat);
+  const lng = parseFloat(req.query.lng);
+
+  if (!lat || !lng) return res.json([]);
+
+  const drivers = [];
+  const now = Date.now();
+
+  for (let i = 0; i < 12; i++) {
+    const driftX = Math.sin((now / 15000) + i) * 0.003;
+    const driftY = Math.cos((now / 15000) + i) * 0.003;
+    const baseX = Math.sin(i * 4.5) * 0.008;
+    const baseY = Math.cos(i * 4.5) * 0.008;
+
+    drivers.push({
+      id: 'mock-driver-' + i,
+      latitude: lat + baseX + driftX,
+      longitude: lng + baseY + driftY,
+      vehicleType: i % 3 === 0 ? 'Auto' : (i % 2 === 0 ? 'Scooty' : 'Bike'),
+      heading: (Math.atan2(driftY, driftX) * 180 / Math.PI + 360) % 360
+    });
+  }
+  res.json(drivers);
+};

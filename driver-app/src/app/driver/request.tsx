@@ -58,6 +58,7 @@ export default function RequestScreen() {
         await notifyTripUpdate(
           'Ride accepted ✓',
           `${activeRequest.riderName} · navigate to pickup`,
+          { type: 'trip', href: '/driver/trip', rideId: activeRequest.id },
         );
       }
       acceptRequest();
