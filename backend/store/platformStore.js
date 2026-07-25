@@ -12,11 +12,13 @@ const RIDES_FILE = path.join(DATA_DIR, 'rides.json');
 const WITHDRAWALS_FILE = path.join(DATA_DIR, 'withdrawals.json');
 const RIDERS_FILE = path.join(DATA_DIR, 'riders.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const PAYMENTS_FILE = path.join(DATA_DIR, 'payments.json');
 
 function ensure() {
   driverStore.ensureFiles();
   if (!fs.existsSync(WITHDRAWALS_FILE)) fs.writeFileSync(WITHDRAWALS_FILE, '[]');
   if (!fs.existsSync(RIDERS_FILE)) fs.writeFileSync(RIDERS_FILE, '[]');
+  if (!fs.existsSync(PAYMENTS_FILE)) fs.writeFileSync(PAYMENTS_FILE, '[]');
   if (!fs.existsSync(SETTINGS_FILE)) {
     fs.writeFileSync(
       SETTINGS_FILE,
@@ -25,12 +27,27 @@ function ensure() {
           // Admin must enable weekly withdrawal window
           weeklyWithdrawOpen: false,
           weeklyWithdrawNote: 'Closed — admin will open every week',
+          // All ride fares are collected by admin/platform
+          platformBalance: 0,
+          platformCurrency: 'INR',
           updatedAt: new Date().toISOString(),
         },
         null,
         2,
       ),
     );
+  } else {
+    // migrate older settings
+    try {
+      const s = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      if (typeof s.platformBalance !== 'number') {
+        s.platformBalance = 0;
+        s.platformCurrency = s.platformCurrency || 'INR';
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null, 2));
+      }
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -378,6 +395,10 @@ function createRide({
     driverSnapshot: null,
     driverLocation: null,
     riderLocation: { lat: Number(pickupLat), lng: Number(pickupLng), updatedAt: new Date().toISOString() },
+    // Filled by attachMatchedDrivers — only these nearest drivers get the request
+    matchedDriverIds: [],
+    matchedDriversSnapshot: [],
+    matchRadiusKm: driverStore.DEFAULT_MATCH_RADIUS_KM || 12,
     otp: String(Math.floor(1000 + Math.random() * 9000)),
     rating: null,
     riderRating: null,
@@ -387,6 +408,27 @@ function createRide({
     timeline: [{ status: 'Requested', at: new Date().toISOString() }],
   };
   rides.unshift(ride);
+  saveRides(rides);
+  return ride;
+}
+
+/** Save the nearest drivers (max 10) who should receive this ride request */
+function attachMatchedDrivers(rideId, matchedDrivers = []) {
+  const rides = listRides();
+  const ride = rides.find((r) => r.id === rideId);
+  if (!ride) return null;
+  const list = Array.isArray(matchedDrivers) ? matchedDrivers.slice(0, 10) : [];
+  ride.matchedDriverIds = list.map((d) => d.id).filter(Boolean);
+  ride.matchedDriversSnapshot = list.map((d) => ({
+    id: d.id,
+    name: d.name,
+    phone: d.phone,
+    rating: d.rating,
+    vehicle: d.vehicle,
+    location: d.location || null,
+    distanceKm: d.distanceKm,
+  }));
+  ride.matchRadiusKm = ride.matchRadiusKm || driverStore.DEFAULT_MATCH_RADIUS_KM || 12;
   saveRides(rides);
   return ride;
 }
@@ -433,9 +475,41 @@ function acceptRide(rideId, driverId) {
     throw err;
   }
 
+  // Only the nearest matched drivers (max 10) may accept
+  if (Array.isArray(ride.matchedDriverIds) && ride.matchedDriverIds.length > 0) {
+    if (!ride.matchedDriverIds.includes(driverId)) {
+      const err = new Error(
+        'This request was only sent to the nearest drivers near the rider. You are outside the match radius.',
+      );
+      err.status = 403;
+      throw err;
+    }
+  } else if (
+    driver.location?.lat != null &&
+    ride.pickupLat != null &&
+    ride.pickupLng != null
+  ) {
+    const dist = driverStore.haversineKm(
+      Number(driver.location.lat),
+      Number(driver.location.lng),
+      Number(ride.pickupLat),
+      Number(ride.pickupLng),
+    );
+    const radius = ride.matchRadiusKm || driverStore.DEFAULT_MATCH_RADIUS_KM || 12;
+    if (dist > radius) {
+      const err = new Error(
+        `Too far from pickup (${dist.toFixed(1)} km). Only drivers within ${radius} km can accept.`,
+      );
+      err.status = 403;
+      throw err;
+    }
+  }
+
   ride.driverId = driverId;
   ride.status = 'Accepted';
   ride.acceptedAt = new Date().toISOString();
+  ride.chatEnabled = true; // open until pickup / trip start
+  ride.chatClosedAt = null;
   ride.driverSnapshot = {
     id: driver.id,
     name: driver.name,
@@ -449,6 +523,21 @@ function acceptRide(rideId, driverId) {
     ? { ...driver.location }
     : null;
   ride.timeline.push({ status: 'Accepted', at: ride.acceptedAt });
+  saveRides(rides);
+  return ride;
+}
+
+/** Attach ETA + WhatsApp notify result after accept */
+function setRideAcceptMeta(rideId, meta = {}) {
+  const rides = listRides();
+  const ride = rides.find((r) => r.id === rideId);
+  if (!ride) return null;
+  if (meta.pickupEtaMinutes != null) ride.pickupEtaMinutes = meta.pickupEtaMinutes;
+  if (meta.pickupDistanceKm != null) ride.pickupDistanceKm = meta.pickupDistanceKm;
+  if (meta.etaSource) ride.etaSource = meta.etaSource;
+  if (meta.whatsappNotify) ride.whatsappNotify = meta.whatsappNotify;
+  if (typeof meta.chatEnabled === 'boolean') ride.chatEnabled = meta.chatEnabled;
+  ride.updatedAt = new Date().toISOString();
   saveRides(rides);
   return ride;
 }
@@ -479,12 +568,181 @@ function updateRideStatus(rideId, driverId, status, otp) {
   }
   ride.status = status;
   ride.timeline.push({ status, at: new Date().toISOString() });
+  // Chat only until pickup/trip start — close after In_Progress / Completed / Cancelled
+  if (status === 'In_Progress' || status === 'Completed' || status === 'Cancelled') {
+    ride.chatEnabled = false;
+    ride.chatClosedAt = new Date().toISOString();
+  } else if (status === 'Arrived') {
+    // Still at pickup — chat stays open
+    ride.chatEnabled = true;
+  }
   if (status === 'Completed') {
     ride.completedAt = new Date().toISOString();
+    // Driver earnings tracked for weekly payout; rider payment is collected by admin/platform
     creditDriver(driverId, ride.fare, { countRide: true });
+    ride.paymentStatus = ride.paymentStatus || 'pending';
+    ride.paymentDestination = 'admin';
+    // Create admin payment record (awaiting rider pay if not already paid)
+    try {
+      recordRidePaymentForAdmin(ride, {
+        status: ride.paymentStatus === 'paid' ? 'received' : 'pending',
+        method: ride.paymentMethod || 'upi',
+        note: 'Auto-created on trip complete — fare goes to admin/platform',
+      });
+    } catch (err) {
+      console.warn('[Payments] record on complete failed:', err.message);
+    }
   }
   saveRides(rides);
   return ride;
+}
+
+// ——— Payments (all ride fares → admin / platform) ———
+function listPayments() {
+  return read(PAYMENTS_FILE);
+}
+
+function savePayments(list) {
+  write(PAYMENTS_FILE, list);
+}
+
+function getPlatformBalance() {
+  const s = getSettings();
+  return typeof s.platformBalance === 'number' ? s.platformBalance : 0;
+}
+
+function addPlatformBalance(amount) {
+  const s = getSettings();
+  const n = Number(amount) || 0;
+  s.platformBalance = Math.round(((s.platformBalance || 0) + n) * 100) / 100;
+  s.updatedAt = new Date().toISOString();
+  write(SETTINGS_FILE, s);
+  return s.platformBalance;
+}
+
+/**
+ * Every completed ride creates a payment owned by admin.
+ * Idempotent per rideId (one payment row per ride).
+ */
+function recordRidePaymentForAdmin(ride, { status = 'pending', method = 'upi', note = '' } = {}) {
+  if (!ride?.id) return null;
+  const list = listPayments();
+  const existing = list.find((p) => p.rideId === ride.id);
+  if (existing) {
+    // refresh fare / meta if still pending
+    if (existing.status === 'pending' && ride.fare != null) {
+      existing.amount = Number(ride.fare) || existing.amount;
+    }
+    existing.updatedAt = new Date().toISOString();
+    savePayments(list);
+    return existing;
+  }
+
+  const payment = {
+    id: id(),
+    rideId: ride.id,
+    amount: Number(ride.fare) || 0,
+    currency: 'INR',
+    // Always admin / platform — never direct to driver wallet as "customer payment"
+    destination: 'admin',
+    status, // pending | received | failed | refunded
+    method, // upi | cash | card | razorpay | other
+    riderId: ride.riderId || null,
+    riderName: ride.riderName || 'Rider',
+    riderPhone: ride.riderPhone || '',
+    driverId: ride.driverId || null,
+    driverName: ride.driverSnapshot?.name || null,
+    driverLoginId: ride.driverSnapshot?.loginId || null,
+    vehicleType: ride.vehicleType || '',
+    pickup: ride.pickup || '',
+    drop: ride.drop || '',
+    note: note || 'Ride fare collected by Raydo admin',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    paidAt: status === 'received' ? new Date().toISOString() : null,
+  };
+  list.unshift(payment);
+  savePayments(list);
+  return payment;
+}
+
+/**
+ * Rider pays after trip — amount is credited to admin platform balance.
+ */
+function collectRiderPayment(rideId, { method = 'upi', transactionId = '', note = '' } = {}) {
+  const rides = listRides();
+  const ride = rides.find((r) => r.id === rideId);
+  if (!ride) {
+    const err = new Error('Ride not found');
+    err.status = 404;
+    throw err;
+  }
+  if (ride.status !== 'Completed') {
+    const err = new Error('Payment only after ride is completed');
+    err.status = 400;
+    throw err;
+  }
+
+  let payment = listPayments().find((p) => p.rideId === rideId);
+  if (!payment) {
+    payment = recordRidePaymentForAdmin(ride, { status: 'pending', method });
+  }
+
+  // Already received — return same (idempotent)
+  if (payment.status === 'received') {
+    return { payment, ride, alreadyPaid: true, platformBalance: getPlatformBalance() };
+  }
+
+  const amount = Number(ride.fare) || Number(payment.amount) || 0;
+  payment.amount = amount;
+  payment.status = 'received';
+  payment.method = method || payment.method || 'upi';
+  payment.transactionId = transactionId || `pay_${Date.now()}`;
+  payment.paidAt = new Date().toISOString();
+  payment.updatedAt = payment.paidAt;
+  payment.destination = 'admin';
+  if (note) payment.note = note;
+
+  const list = listPayments();
+  const idx = list.findIndex((p) => p.id === payment.id);
+  if (idx >= 0) list[idx] = payment;
+  else list.unshift(payment);
+  savePayments(list);
+
+  // Credit admin platform balance
+  const platformBalance = addPlatformBalance(amount);
+
+  ride.paymentStatus = 'paid';
+  ride.paymentMethod = payment.method;
+  ride.paymentId = payment.id;
+  ride.paidAt = payment.paidAt;
+  ride.paymentDestination = 'admin';
+  saveRides(rides);
+
+  return { payment, ride, alreadyPaid: false, platformBalance };
+}
+
+function listPaymentsAdmin(status = 'all') {
+  let list = listPayments();
+  if (status && status !== 'all') {
+    list = list.filter((p) => p.status === status);
+  }
+  list.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+  const received = listPayments().filter((p) => p.status === 'received');
+  const pending = listPayments().filter((p) => p.status === 'pending');
+  const sum = (arr) =>
+    Math.round(arr.reduce((s, p) => s + (Number(p.amount) || 0), 0) * 100) / 100;
+  return {
+    payments: list,
+    stats: {
+      totalPayments: listPayments().length,
+      receivedCount: received.length,
+      pendingCount: pending.length,
+      totalReceived: sum(received),
+      totalPending: sum(pending),
+      platformBalance: getPlatformBalance(),
+    },
+  };
 }
 
 function updateRideDriverLocation(rideId, driverId, lat, lng) {
@@ -525,12 +783,59 @@ function openRidesForDriver(driverId) {
   if (!driver || driver.kycStatus !== 'approved') return [];
   const driverType = driver.vehicle?.type;
   if (!driverType) return [];
-  return listRides().filter((r) => {
-    if (r.status !== 'Requested') return false;
-    if (r.driverId) return false;
-    // Strict: Scooty/Bike ↔ two_wheeler only; Auto ↔ auto; Car ↔ car
-    return driverStore.vehicleMatches(driverType, r.vehicleType);
-  });
+
+  const radiusKm = driverStore.DEFAULT_MATCH_RADIUS_KM || 12;
+  const dLat = driver.location?.lat;
+  const dLng = driver.location?.lng;
+  const hasDriverGps =
+    dLat != null && dLng != null && Number.isFinite(Number(dLat)) && Number.isFinite(Number(dLng));
+
+  return listRides()
+    .filter((r) => {
+      if (r.status !== 'Requested') return false;
+      if (r.driverId) return false;
+      // Strict: Scooty/Bike ↔ two_wheeler only; Auto ↔ auto; Car ↔ car
+      if (!driverStore.vehicleMatches(driverType, r.vehicleType)) return false;
+
+      // Prefer explicit nearest-match list (max 10) stored at request time
+      if (Array.isArray(r.matchedDriverIds) && r.matchedDriverIds.length > 0) {
+        return r.matchedDriverIds.includes(driverId);
+      }
+
+      // Fallback for older rides: only if driver is near pickup
+      if (!hasDriverGps) return false;
+      if (r.pickupLat == null || r.pickupLng == null) return false;
+      const dist = driverStore.haversineKm(
+        Number(dLat),
+        Number(dLng),
+        Number(r.pickupLat),
+        Number(r.pickupLng),
+      );
+      return dist <= (r.matchRadiusKm || radiusKm);
+    })
+    .map((r) => {
+      let distanceKmFromDriver = null;
+      if (hasDriverGps && r.pickupLat != null && r.pickupLng != null) {
+        distanceKmFromDriver =
+          Math.round(
+            driverStore.haversineKm(
+              Number(dLat),
+              Number(dLng),
+              Number(r.pickupLat),
+              Number(r.pickupLng),
+            ) * 100,
+          ) / 100;
+      } else if (Array.isArray(r.matchedDriversSnapshot)) {
+        const snap = r.matchedDriversSnapshot.find((x) => x.id === driverId);
+        if (snap?.distanceKm != null) distanceKmFromDriver = snap.distanceKm;
+      }
+      return { ...r, distanceKmFromDriver };
+    })
+    .sort((a, b) => {
+      const da = a.distanceKmFromDriver ?? 9999;
+      const db = b.distanceKmFromDriver ?? 9999;
+      return da - db;
+    });
 }
 
 function activeRideForDriver(driverId) {
@@ -568,6 +873,8 @@ function cancelRide(rideId, by) {
   }
   ride.status = 'Cancelled';
   ride.cancelledBy = by || 'user';
+  ride.chatEnabled = false;
+  ride.chatClosedAt = new Date().toISOString();
   ride.timeline.push({ status: 'Cancelled', at: new Date().toISOString() });
   saveRides(rides);
   return ride;
@@ -704,6 +1011,7 @@ function adminStats() {
   const rides = listRides();
   const w = listWithdrawals();
   const riderStats = riderAdminStats();
+  const pay = listPaymentsAdmin('all');
   return {
     ...kyc,
     ridesTotal: rides.length,
@@ -713,6 +1021,11 @@ function adminStats() {
     ridesCompleted: rides.filter((r) => r.status === 'Completed').length,
     withdrawalsPending: w.filter((x) => x.status === 'pending_admin').length,
     weeklyWithdrawOpen: getSettings().weeklyWithdrawOpen,
+    paymentsTotal: pay.stats.totalPayments,
+    paymentsReceived: pay.stats.totalReceived,
+    paymentsPending: pay.stats.totalPending,
+    paymentsPendingCount: pay.stats.pendingCount,
+    platformBalance: pay.stats.platformBalance,
     ...riderStats,
   };
 }
@@ -723,8 +1036,10 @@ module.exports = {
   setWeeklyWithdraw,
   updateDriverLocation,
   createRide,
+  attachMatchedDrivers,
   getRide,
   acceptRide,
+  setRideAcceptMeta,
   updateRideStatus,
   updateRideDriverLocation,
   updateRideRiderLocation,
@@ -746,4 +1061,9 @@ module.exports = {
   rateRide,
   riderAdminStats,
   upsertRiderProfile,
+  listPayments,
+  listPaymentsAdmin,
+  recordRidePaymentForAdmin,
+  collectRiderPayment,
+  getPlatformBalance,
 };

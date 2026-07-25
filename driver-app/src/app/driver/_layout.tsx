@@ -21,6 +21,7 @@ export default function DriverLayout() {
         }}
       />
       <Stack.Screen name="trip" />
+      <Stack.Screen name="chat" />
       <Stack.Screen name="complete" />
       <Stack.Screen name="vehicle" />
       <Stack.Screen name="documents" />

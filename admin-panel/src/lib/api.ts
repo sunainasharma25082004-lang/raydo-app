@@ -35,6 +35,11 @@ export type AdminDriver = {
   kycStatus: string;
   kycRejectionReason?: string;
   kycSubmittedAt?: string;
+  createdAt?: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  rejectedAt?: string;
+  rejectedBy?: string;
   vehicle: {
     type: string;
     registrationNumber: string;
@@ -43,8 +48,20 @@ export type AdminDriver = {
     year?: string;
   };
   documents: Record<string, string | undefined>;
-  approvedAt?: string;
+  isOnline?: boolean;
+  rating?: number;
+  totalRides?: number;
 };
+
+/** Resolve KYC doc image path to a loadable URI */
+export function docImageUri(path?: string | null): string | null {
+  if (!path) return null;
+  const p = String(path).trim();
+  if (!p) return null;
+  if (p.startsWith('data:') || p.startsWith('http://') || p.startsWith('https://')) return p;
+  if (p.startsWith('/')) return `${API_BASE}${p}`;
+  return `${API_BASE}/${p}`;
+}
 
 export type AdminRider = {
   id: string;
@@ -80,6 +97,9 @@ export const adminApi = {
       { token },
     ),
 
+  getDriver: (token: string, id: string) =>
+    request<{ driver: AdminDriver }>(`/api/kyc/admin/${id}`, { token }),
+
   stats: (token: string) =>
     request<Record<string, number>>('/api/kyc/admin/stats', { token }),
 
@@ -88,6 +108,13 @@ export const adminApi = {
       message: string;
       driver: AdminDriver;
       credentials: { loginId: string; password: string; note: string };
+      credentialsNotify?: {
+        sent?: boolean;
+        channel?: string;
+        to?: string | null;
+        reason?: string | null;
+        waMeLink?: string | null;
+      };
     }>(`/api/kyc/admin/${id}/approve`, { method: 'POST', token, body: '{}' }),
 
   reject: (token: string, id: string, reason: string) =>
@@ -132,4 +159,38 @@ export const adminApi = {
       token,
       body: JSON.stringify({ blocked, reason }),
     }),
+
+  /** All ride payments collected by admin/platform */
+  payments: (token: string, status = 'all') =>
+    request<{
+      payments: AdminPayment[];
+      stats: {
+        totalPayments: number;
+        receivedCount: number;
+        pendingCount: number;
+        totalReceived: number;
+        totalPending: number;
+        platformBalance: number;
+      };
+    }>(`/api/platform/admin/payments?status=${status}`, { token }),
+};
+
+export type AdminPayment = {
+  id: string;
+  rideId: string;
+  amount: number;
+  currency?: string;
+  destination: string;
+  status: string;
+  method?: string;
+  riderName?: string;
+  riderPhone?: string;
+  driverName?: string;
+  driverLoginId?: string;
+  vehicleType?: string;
+  pickup?: string;
+  drop?: string;
+  createdAt?: string;
+  paidAt?: string | null;
+  transactionId?: string;
 };

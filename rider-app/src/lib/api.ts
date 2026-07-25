@@ -14,6 +14,17 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
+export type NearbyDriver = {
+  id: string;
+  name: string;
+  phone?: string;
+  rating?: number;
+  vehicle?: { type: string; registrationNumber?: string; model?: string };
+  location?: { lat: number; lng: number; updatedAt?: string } | null;
+  distanceKm?: number;
+  isOnline?: boolean;
+};
+
 export type LiveRide = {
   id: string;
   riderId: string;
@@ -36,7 +47,34 @@ export type LiveRide = {
     location?: { lat: number; lng: number } | null;
   } | null;
   driverLocation?: { lat: number; lng: number; updatedAt?: string } | null;
+  matchedDriversSnapshot?: NearbyDriver[];
+  matchedDriverIds?: string[];
+  matchRadiusKm?: number;
+  chatEnabled?: boolean;
+  pickupEtaMinutes?: number | null;
+  pickupDistanceKm?: number | null;
+  whatsappNotify?: {
+    sent?: boolean;
+    channel?: string;
+    message?: string;
+    waMeLink?: string | null;
+  };
   otp?: string;
+  riderPhone?: string;
+  paymentStatus?: string;
+  paymentMethod?: string;
+  paymentId?: string;
+  paymentDestination?: string;
+};
+
+export type ChatMessage = {
+  id: string;
+  rideId?: string;
+  senderRole: 'rider' | 'driver' | string;
+  senderId?: string;
+  text: string;
+  message?: string;
+  createdAt?: string;
 };
 
 export const riderApi = {
@@ -57,11 +95,29 @@ export const riderApi = {
     request<{
       ride: LiveRide;
       matchedDriversCount: number;
-      matchedDrivers: any[];
+      matchedDrivers: NearbyDriver[];
+      matchRule?: {
+        vehicle?: string;
+        maxDrivers?: number;
+        radiusKm?: number;
+        sort?: string;
+      };
+      message?: string;
     }>('/api/platform/rides', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  /** Preview up to 10 nearest online drivers near lat/lng */
+  nearbyDrivers: (vehicleType: string, lat: number, lng: number) =>
+    request<{
+      count: number;
+      radiusKm: number;
+      maxDrivers: number;
+      drivers: NearbyDriver[];
+    }>(
+      `/api/match/drivers?vehicleType=${encodeURIComponent(vehicleType)}&lat=${lat}&lng=${lng}`,
+    ),
 
   getRide: (id: string) => request<{ ride: LiveRide }>(`/api/platform/rides/${id}`),
 
@@ -115,4 +171,43 @@ export const riderApi = {
       }[];
     }>(`/api/map/routing?waypoints=${encodeURIComponent(waypoints)}&mode=${mode}`);
   },
+
+  getChat: (rideId: string) =>
+    request<{ rideId: string; chatEnabled: boolean; status: string; messages: ChatMessage[] }>(
+      `/api/platform/rides/${rideId}/chat`,
+    ),
+
+  sendChat: (
+    rideId: string,
+    body: { text: string; senderRole: 'rider' | 'driver'; senderId?: string },
+  ) =>
+    request<{ message: string; msg: ChatMessage; chatEnabled: boolean }>(
+      `/api/platform/rides/${rideId}/chat`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
+
+  /** Pay after trip complete — amount goes to admin/platform */
+  payRide: (
+    rideId: string,
+    body?: { method?: string; rating?: number; comment?: string; transactionId?: string },
+  ) =>
+    request<{
+      message: string;
+      payment: {
+        id: string;
+        amount: number;
+        status: string;
+        destination: string;
+        method?: string;
+      };
+      ride: LiveRide;
+      platformBalance?: number;
+      alreadyPaid?: boolean;
+    }>(`/api/platform/rides/${rideId}/pay`, {
+      method: 'POST',
+      body: JSON.stringify(body || { method: 'upi' }),
+    }),
 };

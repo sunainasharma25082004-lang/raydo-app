@@ -41,6 +41,13 @@ export default function DocumentsScreen() {
       expiry: docs?.aadhaarNumber ? `XXXX ${docs.aadhaarNumber.slice(-4)}` : 'On file',
     },
     {
+      id: 'pan',
+      title: 'PAN card',
+      status: docs?.panStatus || (approved ? 'Approved' : 'Pending'),
+      ok: (docs?.panStatus || 'Approved') === 'Approved',
+      expiry: docs?.panNumber || 'On file',
+    },
+    {
       id: 'ins',
       title: 'Insurance',
       status: docs?.insuranceStatus || (approved ? 'Approved' : 'Pending'),

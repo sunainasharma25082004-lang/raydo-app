@@ -110,7 +110,17 @@ export default function TrackScreen() {
   };
 
   const handleCall = () => {
-    Linking.openURL(`tel:${driverPhone}`);
+    const digits = String(driverPhone || '').replace(/\D/g, '');
+    if (digits.length < 8) return;
+    const tel =
+      digits.length === 10
+        ? `+91${digits}`
+        : digits.startsWith('91') && digits.length === 12
+          ? `+${digits}`
+          : digits.length > 10
+            ? `+${digits}`
+            : digits;
+    Linking.openURL(`tel:${tel}`).catch(() => {});
   };
 
   const handleSendChat = () => {

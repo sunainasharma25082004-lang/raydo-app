@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Bell, Sparkles, Star, Zap } from 'lucide-react-native';
+import { io, Socket } from 'socket.io-client';
 import { Screen } from '@/components/ui/Screen';
 import { MapCanvas } from '@/components/ui/MapCanvas';
 import { OnlineToggle } from '@/components/driver/OnlineToggle';
@@ -13,13 +14,23 @@ import { Colors, Radius, Shadow } from '@/constants/Colors';
 import { useCurrentLocation } from '@/hooks/use-current-location';
 import { useLiveLocationSync } from '@/hooks/use-live-location-sync';
 import { useSession } from '@/context/SessionContext';
-import { api, LiveRide } from '@/lib/api';
+import { api, LiveRide, SOCKET_URL } from '@/lib/api';
+import {
+  notifyRideRequest,
+  setupDriverNotifications,
+} from '@/lib/notifications';
 
 function pickMatchingRide(rides: LiveRide[] | undefined, driverVehicle?: string | null) {
   if (!rides?.length) return null;
   const matched = rides.filter((r) =>
     driverVehicle ? vehiclesMatch(driverVehicle, r.vehicleType) : true,
   );
+  // Prefer nearest if distance available
+  matched.sort((a, b) => {
+    const da = a.distanceKmFromDriver ?? 999;
+    const db = b.distanceKmFromDriver ?? 999;
+    return da - db;
+  });
   return matched[0] || null;
 }
 
@@ -33,18 +44,25 @@ export default function DriverHomeScreen() {
     todayEarnings,
     todayTrips,
     simulateIncoming,
+    presentIncomingRide,
   } = useDriver();
   const { token, driver: sessionDriver } = useSession();
   const myVehicle = sessionDriver?.vehicle?.type || driver.vehicleCategory;
   const { coords, address, loading: locLoading, error: locError, refresh: refreshLocation } =
     useCurrentLocation({ watch: true, highAccuracy: true });
   const lastNavStatus = useRef<string | null>(null);
+  const shownIds = useRef<Set<string>>(new Set());
+  const socketRef = useRef<Socket | null>(null);
 
   // Real GPS → backend + rider sockets while online
   useLiveLocationSync({ enabled: isOnline, isOnline });
 
+  // Notification permission once
   useEffect(() => {
-    // Prevent push loops when home re-renders under the request modal
+    setupDriverNotifications();
+  }, []);
+
+  useEffect(() => {
     if (lastNavStatus.current === tripStatus) return;
 
     if (tripStatus === 'incoming') {
@@ -61,48 +79,95 @@ export default function DriverHomeScreen() {
     }
   }, [tripStatus, router]);
 
-  // Auto-check server for real rider requests while online (same vehicle only)
+  const offerRide = (r: LiveRide) => {
+    if (!r?.id || shownIds.current.has(r.id)) return;
+    if (tripStatus !== 'idle' || !isOnline) return;
+
+    const shown = presentIncomingRide({
+      id: r.id,
+      riderName: r.riderName,
+      pickup: r.pickup,
+      drop: r.drop,
+      fare: r.fare,
+      distanceKm: r.distanceKm,
+      vehicleType: r.vehicleType,
+      distanceKmFromDriver: r.distanceKmFromDriver,
+      riderPhone: r.riderPhone,
+    });
+    if (!shown) return;
+
+    shownIds.current.add(r.id);
+    notifyRideRequest({
+      riderName: r.riderName || 'Rider',
+      fare: r.fare || 0,
+      pickup: r.pickup || 'Pickup',
+      vehicle: r.vehicleType,
+      distanceKm: r.distanceKmFromDriver,
+    });
+  };
+
+  // Poll server for open rides while online
   useEffect(() => {
     if (!isOnline || !token || tripStatus !== 'idle') return;
     let cancelled = false;
-    let shownId: string | null = null;
+
     const check = async () => {
       try {
         const res = await api.openRides(token);
         if (cancelled) return;
         const r = pickMatchingRide(res.rides, myVehicle);
-        if (!r || r.id === shownId) return;
-        shownId = r.id;
-        Alert.alert(
-          `Live ${r.vehicleType} request`,
-          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}\n(Matched to your ${myVehicle})`,
-          [
-            { text: 'Later', style: 'cancel' },
-            {
-              text: 'Accept & go',
-              onPress: async () => {
-                try {
-                  await api.acceptRide(token, r.id);
-                  router.push('/driver/trip');
-                } catch (e: any) {
-                  Alert.alert('Accept failed', e.message);
-                  shownId = null;
-                }
-              },
-            },
-          ],
-        );
+        if (r) offerRide(r);
       } catch {
         /* backend offline */
       }
     };
+
     check();
-    const t = setInterval(check, 8000);
+    const t = setInterval(check, 5000);
     return () => {
       cancelled = true;
       clearInterval(t);
     };
-  }, [isOnline, token, tripStatus, router, myVehicle]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, token, tripStatus, myVehicle]);
+
+  // Instant socket requests
+  useEffect(() => {
+    if (!isOnline || !token || !sessionDriver?.id) return;
+
+    const socket = io(SOCKET_URL, {
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+    });
+    socketRef.current = socket;
+
+    socket.on('connect', () => {
+      socket.emit('join_driver', {
+        driverId: sessionDriver.id,
+        vehicleType: sessionDriver.vehicle?.type || myVehicle,
+      });
+      if (sessionDriver.vehicle?.type || myVehicle) {
+        socket.emit('join_vehicle_group', sessionDriver.vehicle?.type || myVehicle);
+      }
+    });
+
+    socket.on('new_ride_request', (payload: { ride?: LiveRide; distanceKm?: number }) => {
+      const ride = payload?.ride;
+      if (!ride?.id) return;
+      if (!vehiclesMatch(myVehicle, ride.vehicleType)) return;
+      offerRide({
+        ...ride,
+        distanceKmFromDriver:
+          payload.distanceKm ?? ride.distanceKmFromDriver ?? null,
+      });
+    });
+
+    return () => {
+      socket.disconnect();
+      socketRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, token, sessionDriver?.id, myVehicle]);
 
   const busy = tripStatus !== 'idle' && tripStatus !== 'incoming';
 
@@ -110,12 +175,10 @@ export default function DriverHomeScreen() {
     setOnline(value);
     if (token) {
       try {
-        await api.setOnline(
-          token,
-          value,
-          coords?.latitude,
-          coords?.longitude,
-        );
+        await api.setOnline(token, value, coords?.latitude, coords?.longitude);
+        if (value) {
+          setupDriverNotifications();
+        }
       } catch (e: any) {
         if (value) {
           Alert.alert(
@@ -141,28 +204,20 @@ export default function DriverHomeScreen() {
       const res = await api.openRides(token);
       const r = pickMatchingRide(res.rides, myVehicle);
       if (r) {
-        Alert.alert(
-          `Nearby ${r.vehicleType}`,
-          `${r.riderName}\n${r.pickup} → ${r.drop}\n₹${r.fare} · ${r.vehicleType}\nYour vehicle: ${myVehicle}`,
-          [
-            { text: 'Ignore', style: 'cancel' },
-            {
-              text: 'Accept',
-              onPress: async () => {
-                try {
-                  await api.acceptRide(token, r.id);
-                  router.push('/driver/trip');
-                } catch (e: any) {
-                  Alert.alert('Accept failed', e.message);
-                }
-              },
-            },
-          ],
-        );
+        // Clear so manual check can re-show
+        shownIds.current.delete(r.id);
+        offerRide(r);
+        if (tripStatus === 'idle') {
+          // presentIncomingRide will navigate via effect
+        }
       } else {
         Alert.alert(
-          'No matching rides',
-          `No open ${myVehicle === 'Scooty' || myVehicle === 'Bike' ? 'two-wheeler (Scooty/Bike)' : myVehicle} requests right now.\n\nRiders who book other vehicle types will not appear here.`,
+          'No nearby rides',
+          `No open ${
+            myVehicle === 'Scooty' || myVehicle === 'Bike'
+              ? 'two-wheeler (Scooty/Bike)'
+              : myVehicle
+          } requests near you right now.`,
         );
       }
     } catch (e: any) {
@@ -178,100 +233,80 @@ export default function DriverHomeScreen() {
           subtitle={
             locError
               ? locError
-              : address || (isOnline ? 'Waiting for ride requests' : 'Go online to start')
+              : address ||
+                (locLoading
+                  ? 'Getting live GPS…'
+                  : coords
+                    ? `${coords.latitude.toFixed(4)}, ${coords.longitude.toFixed(4)}`
+                    : 'Enable location for matching')
           }
-          showRoute={false}
+          showRoute={isOnline}
           coords={coords}
-          loading={locLoading}
+          loading={locLoading && !coords}
         />
-
-        <View style={styles.topBar}>
-          <View style={styles.identity}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {driver.name
-                  .split(' ')
-                  .map((p) => p[0])
-                  .join('')
-                  .slice(0, 2)}
-              </Text>
-            </View>
-            <View>
-              <Text style={styles.hello}>Hello, {driver.name.split(' ')[0]}</Text>
-              <View style={styles.ratingRow}>
-                <Star size={12} color={Colors.accent} fill={Colors.accent} />
-                <Text style={styles.ratingText}>
-                  {driver.rating} · {driver.vehicle}
-                </Text>
-              </View>
-            </View>
+        <View style={styles.mapTop}>
+          <View style={styles.brandChip}>
+            <Text style={styles.brandText}>Raydo Partner</Text>
           </View>
-
-          <Pressable style={styles.bell}>
-            <Bell size={20} color={Colors.primary} />
-            <View style={styles.dot} />
+          <Pressable style={styles.bell} onPress={() => setupDriverNotifications()}>
+            <Bell size={18} color={Colors.primary} />
           </Pressable>
         </View>
       </View>
 
       <View style={styles.sheet}>
-        <View style={styles.handle} />
+        <View style={styles.greetingRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.hello}>Namaste, {driver.name.split(' ')[0]}</Text>
+            <Text style={styles.city}>
+              {driver.city} · {driver.vehicleCategory}
+              {sessionDriver?.loginId ? ` · ${sessionDriver.loginId}` : ''}
+            </Text>
+          </View>
+          <View style={styles.ratingBadge}>
+            <Star size={14} color={Colors.accent} fill={Colors.accent} />
+            <Text style={styles.ratingText}>{driver.rating.toFixed(2)}</Text>
+          </View>
+        </View>
 
         <OnlineToggle online={isOnline} onChange={goOnline} disabled={busy} />
 
+        {isOnline ? (
+          <View style={styles.listenBanner}>
+            <Zap size={16} color={Colors.accentDark} />
+            <Text style={styles.listenText}>
+              Listening for nearest requests · notifications on
+            </Text>
+          </View>
+        ) : null}
+
         <View style={styles.stats}>
-          <StatPill
-            label="Today"
-            value={formatInr(todayEarnings)}
-            tone="accent"
-            icon={<Zap size={16} color={Colors.accentDark} />}
-          />
-          <StatPill
-            label="Trips"
-            value={String(todayTrips)}
-            tone="success"
-            icon={<Sparkles size={16} color={Colors.success} />}
-          />
-          <StatPill label="Rating" value={String(driver.rating)} />
+          <StatPill label="Today" value={formatInr(todayEarnings)} tone="success" />
+          <StatPill label="Trips" value={String(todayTrips)} />
+          <StatPill label="Total" value={String(driver.trips)} tone="accent" />
         </View>
 
-        <View style={styles.tipCard}>
-          <Text style={styles.tipTitle}>
-            {isOnline ? 'You are live' : 'Quick start'}
-          </Text>
-          <Text style={styles.tipBody}>
-            {coords
-              ? `Live GPS active${coords.accuracy != null ? ` (±${Math.round(coords.accuracy)}m)` : ''}. ${
-                  isOnline
-                    ? `Only ${
-                        myVehicle === 'Scooty' || myVehicle === 'Bike'
-                          ? 'Scooty / Bike (two-wheeler)'
-                          : myVehicle
-                      } requests will come to you — not other vehicles.`
-                    : 'Go online to receive matching vehicle requests near you.'
-                }`
-              : locLoading
-                ? 'Requesting location permission and GPS fix…'
-                : 'Location not available yet. Tap below to allow GPS access.'}
-          </Text>
-          {!coords ? (
+        <View style={styles.actions}>
+          <Button
+            title="Check nearby requests"
+            onPress={fetchOpenRides}
+            fullWidth
+            leftIcon={<Sparkles size={16} color={Colors.white} />}
+          />
+          {!token ? (
             <Button
-              title="Enable location access"
-              variant="accent"
-              onPress={refreshLocation}
-              style={{ marginTop: 12 }}
+              title="Demo request (offline mode)"
+              variant="outline"
+              onPress={simulateIncoming}
               fullWidth
             />
           ) : null}
-          {isOnline && tripStatus === 'idle' ? (
-            <Button
-              title="Check live ride requests"
-              variant="accent"
-              onPress={fetchOpenRides}
-              style={{ marginTop: 12 }}
-              fullWidth
-            />
-          ) : null}
+          <Button
+            title="Refresh GPS"
+            variant="ghost"
+            onPress={() => refreshLocation()}
+            fullWidth
+          />
         </View>
       </View>
     </Screen>
@@ -280,122 +315,65 @@ export default function DriverHomeScreen() {
 
 const styles = StyleSheet.create({
   screen: { backgroundColor: Colors.background },
-  mapArea: {
-    height: '42%',
-    minHeight: 260,
-  },
-  topBar: {
+  mapArea: { height: '36%', minHeight: 210 },
+  mapTop: {
     position: 'absolute',
     top: 12,
-    left: 16,
-    right: 16,
+    left: 14,
+    right: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  identity: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    backgroundColor: Colors.white,
+  brandChip: {
+    backgroundColor: 'rgba(15,28,63,0.82)',
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderRadius: Radius.full,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    ...Shadow.soft,
-    maxWidth: '78%',
   },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: Colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: Colors.white,
-    fontWeight: '800',
-    fontSize: 12,
-  },
-  hello: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: Colors.text,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  ratingText: {
-    fontSize: 11,
-    color: Colors.textSecondary,
-    fontWeight: '600',
-  },
+  brandText: { color: Colors.white, fontWeight: '800', fontSize: 12 },
   bell: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: Colors.white,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: Colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: Colors.border,
     ...Shadow.soft,
-  },
-  dot: {
-    position: 'absolute',
-    top: 12,
-    right: 13,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.error,
-    borderWidth: 1,
-    borderColor: Colors.white,
   },
   sheet: {
     flex: 1,
-    marginTop: -22,
+    marginTop: -18,
     backgroundColor: Colors.background,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
-    paddingHorizontal: 18,
-    paddingTop: 10,
+    padding: 18,
     gap: 14,
+    ...Shadow.floating,
   },
-  handle: {
-    alignSelf: 'center',
-    width: 42,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: Colors.borderStrong,
-    marginBottom: 4,
-  },
-  stats: {
+  greetingRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  hello: { fontSize: 22, fontWeight: '800', color: Colors.text },
+  city: { fontSize: 13, color: Colors.textSecondary, fontWeight: '600', marginTop: 2 },
+  ratingBadge: {
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: Colors.accentSoft,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: Radius.full,
   },
-  tipCard: {
-    backgroundColor: Colors.surface,
-    borderRadius: Radius.lg,
-    borderWidth: 1,
-    borderColor: Colors.border,
-    padding: 16,
-    ...Shadow.soft,
+  ratingText: { fontWeight: '800', color: Colors.primary, fontSize: 13 },
+  listenBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.accentSoft,
+    borderRadius: Radius.md,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
   },
-  tipTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-    color: Colors.text,
-  },
-  tipBody: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 19,
-    color: Colors.textSecondary,
-  },
+  listenText: { flex: 1, fontSize: 12, fontWeight: '700', color: Colors.accentDark },
+  stats: { flexDirection: 'row', gap: 8 },
+  actions: { gap: 8, marginTop: 4 },
 });

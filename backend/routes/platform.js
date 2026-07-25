@@ -18,6 +18,10 @@ router.get('/rides/:id', c.getRide);
 router.post('/rides/:id/cancel', c.cancelRide);
 router.post('/rides/rider-location', c.pushRiderLocation);
 
+// In-ride chat (open only Accepted/Arrived — closed after pickup)
+router.get('/rides/:id/chat', c.getChat);
+router.post('/rides/:id/chat', c.postChat);
+
 // Driver
 router.post('/rides/:id/accept', auth, requireDriver, c.acceptRide);
 router.post('/rides/:id/status', auth, requireDriver, c.updateStatus);
@@ -30,11 +34,15 @@ router.post('/driver/withdraw', auth, requireDriver, c.requestWithdraw);
 // Ratings (rider or driver)
 router.post('/rides/:id/rate', c.rateRide);
 
+// Rider pays after complete — fare goes to admin/platform
+router.post('/rides/:id/pay', c.payRide);
+
 // Admin
 router.get('/admin/stats', auth, requireAdmin, c.adminStats);
 router.get('/admin/rides', auth, requireAdmin, c.adminRides);
 router.get('/admin/riders', auth, requireAdmin, c.adminRiders);
 router.post('/admin/riders/:id/block', auth, requireAdmin, c.adminBlockRider);
+router.get('/admin/payments', auth, requireAdmin, c.adminPayments);
 router.get('/admin/withdrawals', auth, requireAdmin, c.adminWithdrawals);
 router.post('/admin/withdrawals/:id/decide', auth, requireAdmin, c.adminDecideWithdraw);
 router.post('/admin/weekly-withdraw', auth, requireAdmin, c.adminWeeklyWindow);

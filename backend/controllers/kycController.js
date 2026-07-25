@@ -41,12 +41,77 @@ exports.listPending = (req, res) => {
   }
 };
 
-exports.approve = (req, res) => {
+/** Full driver KYC detail for admin (documents + photo paths) */
+exports.getAdminDriver = (req, res) => {
+  try {
+    const driver = store.findDriverById(req.params.id);
+    if (!driver) {
+      return res.status(404).json({ message: 'Driver not found' });
+    }
+    res.json({ driver: store.publicDriver(driver, { includeSecrets: true }) });
+  } catch (error) {
+    res.status(500).json({ message: error.message });
+  }
+};
+
+exports.approve = async (req, res) => {
   try {
     const result = store.approveKyc(req.params.id, req.user?.username || 'admin');
+    const driver = result.driver;
+    const credentials = result.credentials;
+
+    // Send Driver ID + password to registered mobile (SMS / WhatsApp if configured)
+    let credentialsNotify = null;
+    try {
+      const { notifyDriverCredentials } = require('../services/notify');
+      credentialsNotify = await notifyDriverCredentials({
+        phone: driver.phone,
+        name: driver.name,
+        loginId: credentials.loginId,
+        password: credentials.password,
+      });
+      // Persist last notify status on driver for admin audit
+      try {
+        const list = store.listDrivers();
+        const raw = list.find((d) => d.id === driver.id);
+        // listDrivers returns public copy without secrets — update via re-approve path
+        // Write notify meta by reading/writing file through approve already saved driver
+        const fs = require('fs');
+        const path = require('path');
+        const file = path.join(__dirname, '..', 'data', 'drivers.json');
+        const all = JSON.parse(fs.readFileSync(file, 'utf8'));
+        const d = all.find((x) => x.id === driver.id);
+        if (d) {
+          d.credentialsNotify = {
+            sent: !!credentialsNotify?.sent,
+            channel: credentialsNotify?.channel || 'none',
+            to: credentialsNotify?.to || null,
+            at: new Date().toISOString(),
+            reason: credentialsNotify?.reason || null,
+          };
+          fs.writeFileSync(file, JSON.stringify(all, null, 2));
+          if (result.driver) result.driver.credentialsNotify = d.credentialsNotify;
+        }
+      } catch (persistErr) {
+        console.warn('[KYC] credentialsNotify persist failed', persistErr.message);
+      }
+    } catch (notifyErr) {
+      console.warn('[KYC] credentials notify failed', notifyErr.message);
+      credentialsNotify = {
+        sent: false,
+        channel: 'error',
+        reason: notifyErr.message,
+      };
+    }
+
+    const smsNote = credentialsNotify?.sent
+      ? `Credentials sent to +91 ${String(driver.phone || '').slice(-10)} via ${credentialsNotify.channel}.`
+      : `Credentials saved for admin. SMS/WhatsApp not sent (${credentialsNotify?.reason || 'no provider'}) — share manually if needed.`;
+
     res.json({
-      message: 'KYC approved. Share Driver ID & password with the partner.',
+      message: `KYC approved. ${smsNote}`,
       ...result,
+      credentialsNotify,
     });
   } catch (error) {
     res.status(error.status || 500).json({ message: error.message });

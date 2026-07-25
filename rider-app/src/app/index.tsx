@@ -219,7 +219,7 @@ const styles = StyleSheet.create({
     letterSpacing: 2,
   },
   bgOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: Colors.primary,
     opacity: 0.95,
   },
@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
     resizeMode: 'cover',
   },
   imageOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: Colors.primary,
     opacity: 0.1,
   },

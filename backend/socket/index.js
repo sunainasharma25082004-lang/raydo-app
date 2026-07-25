@@ -52,6 +52,13 @@ module.exports = (io) => {
 
     socket.on('join_ride', (rideId) => {
       socket.join(`ride:${rideId}`);
+      if (rideId) socket.join(`chat:${rideId}`);
+    });
+
+    socket.on('join_chat', (rideId) => {
+      if (!rideId) return;
+      socket.join(`chat:${rideId}`);
+      socket.join(`ride:${rideId}`);
     });
 
     // Live driver GPS (real phone location)
@@ -129,17 +136,64 @@ module.exports = (io) => {
     });
 
     socket.on('send_chat_message', (data) => {
-      const { receiverId, message, senderId, senderRole } = data || {};
-      if (!receiverId || !message) return;
-      const payload = {
-        message,
-        senderId,
-        senderRole,
-        timestamp: new Date().toISOString(),
-      };
-      io.to(String(receiverId)).emit('receive_chat_message', payload);
-      io.to(`rider:${receiverId}`).emit('receive_chat_message', payload);
-      io.to(`driver:${receiverId}`).emit('receive_chat_message', payload);
+      try {
+        const chatStore = require('../store/chatStore');
+        const {
+          rideId,
+          receiverId,
+          message,
+          text,
+          senderId,
+          senderRole,
+        } = data || {};
+        const body = text || message;
+        if (!body) return;
+
+        // Prefer ride-scoped chat with status guard
+        if (rideId) {
+          const ride = platform.getRide(rideId);
+          if (!ride) return;
+          const open =
+            ride.chatEnabled !== false && chatStore.isChatOpen(ride.status);
+          if (!open) {
+            socket.emit('chat_error', {
+              rideId,
+              message: 'Chat closed after pickup. Messaging is not allowed now.',
+            });
+            return;
+          }
+          const msg = chatStore.addMessage({
+            rideId,
+            senderRole: senderRole === 'driver' ? 'driver' : 'rider',
+            senderId: senderId || '',
+            text: body,
+            rideStatus: ride.status,
+          });
+          io.to(`chat:${rideId}`).emit('receive_chat_message', msg);
+          io.to(`ride:${rideId}`).emit('receive_chat_message', msg);
+          io.to(`rider:${ride.riderId}`).emit('receive_chat_message', msg);
+          if (ride.driverId) {
+            io.to(`driver:${ride.driverId}`).emit('receive_chat_message', msg);
+          }
+          return;
+        }
+
+        // Legacy peer-to-peer fallback
+        if (!receiverId) return;
+        const payload = {
+          id: `${Date.now()}`,
+          text: body,
+          message: body,
+          senderId,
+          senderRole,
+          createdAt: new Date().toISOString(),
+        };
+        io.to(String(receiverId)).emit('receive_chat_message', payload);
+        io.to(`rider:${receiverId}`).emit('receive_chat_message', payload);
+        io.to(`driver:${receiverId}`).emit('receive_chat_message', payload);
+      } catch (err) {
+        socket.emit('chat_error', { message: err.message || 'Chat failed' });
+      }
     });
 
     socket.on('disconnect', () => {

@@ -3,6 +3,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
+const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 const DRIVERS_FILE = path.join(DATA_DIR, 'drivers.json');
 const ADMINS_FILE = path.join(DATA_DIR, 'admins.json');
 const RIDES_FILE = path.join(DATA_DIR, 'rides.json');
@@ -10,6 +11,7 @@ const COUNTERS_FILE = path.join(DATA_DIR, 'counters.json');
 
 function ensureFiles() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
   if (!fs.existsSync(DRIVERS_FILE)) fs.writeFileSync(DRIVERS_FILE, '[]');
   if (!fs.existsSync(RIDES_FILE)) fs.writeFileSync(RIDES_FILE, '[]');
   if (!fs.existsSync(COUNTERS_FILE)) {
@@ -26,6 +28,57 @@ function ensureFiles() {
     };
     fs.writeFileSync(ADMINS_FILE, JSON.stringify([admin], null, 2));
   }
+}
+
+/**
+ * Save a KYC document image from data URL or keep existing path/URL.
+ * Returns public path like /api/kyc/docs/{driverId}/license.jpg
+ */
+function saveDocPhoto(driverId, key, input) {
+  if (!input || typeof input !== 'string') return '';
+  const trimmed = input.trim();
+  if (!trimmed) return '';
+
+  // Already a stored path or remote URL
+  if (
+    trimmed.startsWith('/api/kyc/docs/') ||
+    trimmed.startsWith('http://') ||
+    trimmed.startsWith('https://')
+  ) {
+    return trimmed;
+  }
+
+  const match = trimmed.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,(.+)$/);
+  if (!match) {
+    // Unknown string — ignore rather than store junk
+    return '';
+  }
+
+  const mime = match[1].toLowerCase();
+  const b64 = match[2].replace(/\s/g, '');
+  let ext = 'jpg';
+  if (mime.includes('png')) ext = 'png';
+  else if (mime.includes('webp')) ext = 'webp';
+  else if (mime.includes('jpeg') || mime.includes('jpg')) ext = 'jpg';
+
+  const dir = path.join(UPLOADS_DIR, driverId);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  // Remove previous extensions for this key
+  for (const e of ['jpg', 'jpeg', 'png', 'webp']) {
+    const old = path.join(dir, `${key}.${e}`);
+    if (fs.existsSync(old)) {
+      try {
+        fs.unlinkSync(old);
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  const fileName = `${key}.${ext}`;
+  fs.writeFileSync(path.join(dir, fileName), Buffer.from(b64, 'base64'));
+  return `/api/kyc/docs/${driverId}/${fileName}`;
 }
 
 function readJson(file) {
@@ -135,6 +188,31 @@ function applyKyc(payload) {
     err.status = 400;
     throw err;
   }
+  if (!payload.documents?.aadhaarNumber || String(payload.documents.aadhaarNumber).replace(/\D/g, '').length !== 12) {
+    const err = new Error('Valid 12-digit Aadhaar number is required');
+    err.status = 400;
+    throw err;
+  }
+  if (!payload.documents?.panNumber || String(payload.documents.panNumber).trim().length < 10) {
+    const err = new Error('Valid PAN number is required');
+    err.status = 400;
+    throw err;
+  }
+
+  const docsIn = payload.documents || {};
+  const requiredPhotos = [
+    ['licensePhoto', 'Driving licence photo'],
+    ['aadhaarPhoto', 'Aadhaar photo'],
+    ['panPhoto', 'PAN card photo'],
+    ['rcPhoto', 'RC photo'],
+  ];
+  for (const [key, label] of requiredPhotos) {
+    if (!docsIn[key] || String(docsIn[key]).trim().length < 20) {
+      const err = new Error(`${label} is required — upload a clear image`);
+      err.status = 400;
+      throw err;
+    }
+  }
 
   const allowed = ['Bike', 'Scooty', 'Auto', 'Car'];
   if (!allowed.includes(payload.vehicle.type)) {
@@ -152,6 +230,16 @@ function applyKyc(payload) {
     throw err;
   }
 
+  const driverId = existing?.id || generateId();
+
+  const licensePhoto = saveDocPhoto(driverId, 'license', docsIn.licensePhoto);
+  const aadhaarPhoto = saveDocPhoto(driverId, 'aadhaar', docsIn.aadhaarPhoto);
+  const panPhoto = saveDocPhoto(driverId, 'pan', docsIn.panPhoto);
+  const rcPhoto = saveDocPhoto(driverId, 'rc', docsIn.rcPhoto);
+  const profilePhoto = docsIn.profilePhoto
+    ? saveDocPhoto(driverId, 'profile', docsIn.profilePhoto)
+    : existing?.documents?.profilePhoto || '';
+
   const base = {
     phone,
     name: payload.name.trim(),
@@ -165,14 +253,21 @@ function applyKyc(payload) {
       year: payload.vehicle.year || '',
     },
     documents: {
-      licenseNumber: String(payload.documents.licenseNumber).toUpperCase().trim(),
+      licenseNumber: String(docsIn.licenseNumber).toUpperCase().trim(),
+      licensePhoto,
       licenseStatus: 'Pending',
-      rcNumber: (payload.documents.rcNumber || payload.vehicle.registrationNumber || '').toUpperCase().trim(),
+      rcNumber: (docsIn.rcNumber || payload.vehicle.registrationNumber || '').toUpperCase().trim(),
+      rcPhoto,
       rcStatus: 'Pending',
-      aadhaarNumber: (payload.documents.aadhaarNumber || '').replace(/\D/g, ''),
+      aadhaarNumber: String(docsIn.aadhaarNumber || '').replace(/\D/g, ''),
+      aadhaarPhoto,
       aadhaarStatus: 'Pending',
-      insuranceNumber: (payload.documents.insuranceNumber || '').trim(),
+      panNumber: String(docsIn.panNumber || '').toUpperCase().trim(),
+      panPhoto,
+      panStatus: 'Pending',
+      insuranceNumber: (docsIn.insuranceNumber || '').trim(),
       insuranceStatus: 'Pending',
+      profilePhoto,
       photoStatus: 'Pending',
     },
     kycStatus: 'pending',
@@ -194,7 +289,7 @@ function applyKyc(payload) {
     });
   } else {
     existing = {
-      id: generateId(),
+      id: driverId,
       loginId: null,
       passwordHash: null,
       tempPassword: null,
@@ -242,6 +337,7 @@ function approveKyc(driverId, adminUsername) {
     licenseStatus: 'Approved',
     rcStatus: 'Approved',
     aadhaarStatus: 'Approved',
+    panStatus: 'Approved',
     insuranceStatus: 'Approved',
     photoStatus: 'Approved',
   };
@@ -280,6 +376,7 @@ function rejectKyc(driverId, reason, adminUsername) {
     licenseStatus: 'Rejected',
     rcStatus: 'Rejected',
     aadhaarStatus: 'Rejected',
+    panStatus: 'Rejected',
     insuranceStatus: 'Rejected',
     photoStatus: 'Rejected',
   };
@@ -355,6 +452,71 @@ function listOnlineDriversByVehicle(requestedType) {
     .map((d) => publicDriver(d));
 }
 
+/** Earth distance in km between two GPS points */
+function haversineKm(lat1, lng1, lat2, lng2) {
+  const R = 6371;
+  const toRad = (d) => (Number(d) * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+/**
+ * Nearest online drivers for a rider pickup GPS.
+ * - Same vehicle group only (Scooty/Bike, Auto, Car)
+ * - Must have live location
+ * - Within radiusKm (default 12 km)
+ * - Sorted nearest → farthest
+ * - Cap at limit (default 10)
+ */
+function listNearestOnlineDrivers(
+  requestedType,
+  lat,
+  lng,
+  { limit = 10, radiusKm = 12, maxLocationAgeMs = 30 * 60 * 1000 } = {},
+) {
+  const latN = Number(lat);
+  const lngN = Number(lng);
+  if (!Number.isFinite(latN) || !Number.isFinite(lngN)) {
+    return [];
+  }
+
+  const now = Date.now();
+  const max = Math.max(1, Math.min(Number(limit) || 10, 10)); // hard cap 10
+  const radius = Math.max(0.5, Number(radiusKm) || 12);
+
+  return listDrivers()
+    .filter((d) => {
+      if (d.kycStatus !== 'approved' || !d.isOnline) return false;
+      if (!vehicleMatches(d.vehicle?.type, requestedType)) return false;
+      const loc = d.location;
+      if (!loc || loc.lat == null || loc.lng == null) return false;
+      if (!Number.isFinite(Number(loc.lat)) || !Number.isFinite(Number(loc.lng))) return false;
+      // Optional: skip very stale GPS (still allow if no timestamp)
+      if (loc.updatedAt && maxLocationAgeMs > 0) {
+        const age = now - new Date(loc.updatedAt).getTime();
+        if (Number.isFinite(age) && age > maxLocationAgeMs) return false;
+      }
+      return true;
+    })
+    .map((d) => {
+      const distanceKm =
+        Math.round(
+          haversineKm(latN, lngN, Number(d.location.lat), Number(d.location.lng)) * 100,
+        ) / 100;
+      return {
+        ...publicDriver(d),
+        distanceKm,
+      };
+    })
+    .filter((d) => d.distanceKm <= radius)
+    .sort((a, b) => a.distanceKm - b.distanceKm || String(a.name).localeCompare(String(b.name)))
+    .slice(0, max);
+}
+
 function getKycStats() {
   const list = listDrivers();
   return {
@@ -409,6 +571,7 @@ module.exports = {
   verifyPassword,
   vehicleGroup,
   vehicleMatches,
+  haversineKm,
   publicDriver,
   listDrivers,
   findDriverById,
@@ -421,9 +584,12 @@ module.exports = {
   loginAdmin,
   setOnline,
   listOnlineDriversByVehicle,
+  listNearestOnlineDrivers,
   getKycStats,
   createRideRequest,
   getOpenRidesForDriver,
   listRides,
   ensureFiles,
+  MAX_NEARBY_DRIVERS: 10,
+  DEFAULT_MATCH_RADIUS_KM: 12,
 };

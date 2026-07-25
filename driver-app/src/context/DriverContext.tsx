@@ -45,8 +45,33 @@ type DriverContextValue = {
   rejectRequest: () => void;
   arrivedAtPickup: () => void;
   startTrip: () => void;
-  completeTrip: (rating?: number) => void;
+  completeTrip: (rating?: number, rideOverride?: Partial<RideRequest> | null) => void;
   resetToIdle: () => void;
+  /** Sync server ride into local active request (accept flow → trip) */
+  setActiveFromServerRide: (ride: {
+    id: string;
+    riderName?: string;
+    pickup?: string;
+    drop?: string;
+    fare?: number;
+    distanceKm?: number;
+    vehicleType?: string;
+    distanceKmFromDriver?: number | null;
+    riderPhone?: string;
+  }) => void;
+  /** Show polished incoming request UI (notification modal) */
+  presentIncomingRide: (ride: {
+    id: string;
+    riderName?: string;
+    pickup?: string;
+    drop?: string;
+    fare?: number;
+    distanceKm?: number;
+    vehicleType?: string;
+    distanceKmFromDriver?: number | null;
+    riderPhone?: string;
+  }) => boolean;
+  lastCompleted: HistoryTrip | null;
 };
 
 const DriverContext = createContext<DriverContextValue | null>(null);
@@ -64,6 +89,7 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
   const [todayEarnings, setTodayEarnings] = useState(167);
   const [todayTrips, setTodayTrips] = useState(2);
   const [history, setHistory] = useState<HistoryTrip[]>(INITIAL_HISTORY);
+  const [lastCompleted, setLastCompleted] = useState<HistoryTrip | null>(null);
 
   const autoRequestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tripStatusRef = useRef<TripStatus>(tripStatus);
@@ -180,33 +206,113 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
     setTripStatus('in_trip');
   }, []);
 
-  const completeTrip = useCallback(
-    (rating = 5) => {
-      const req = activeRequestRef.current;
-      if (!req) return;
-      const now = new Date();
-      const time = now.toLocaleTimeString('en-IN', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-      const entry: HistoryTrip = {
-        id: `h-${Date.now()}`,
-        date: 'Today',
-        time,
-        pickup: req.pickup,
-        drop: req.drop,
-        fare: req.fare,
-        distanceKm: req.distanceKm,
-        rating,
-        payment: req.payment,
-      };
-      setHistory((prev) => [entry, ...prev]);
-      setTodayEarnings((v) => v + req.fare);
-      setTodayTrips((v) => v + 1);
-      setTripStatus('completed');
+  const rideToRequest = (ride: {
+    id: string;
+    riderName?: string;
+    pickup?: string;
+    drop?: string;
+    fare?: number;
+    distanceKm?: number;
+    vehicleType?: string;
+    distanceKmFromDriver?: number | null;
+    riderPhone?: string;
+  }): RideRequest => ({
+    id: ride.id,
+    riderName: ride.riderName || 'Rider',
+    riderRating: 5,
+    pickup: ride.pickup || 'Pickup',
+    pickupArea: ride.pickup || '',
+    drop: ride.drop || 'Drop',
+    dropArea: ride.drop || '',
+    distanceKm: Number(ride.distanceKm) || 0,
+    etaMin: Math.max(
+      1,
+      Math.ceil(
+        ((Number(ride.distanceKmFromDriver) || Number(ride.distanceKm) || 3) / 22) * 60,
+      ),
+    ),
+    fare: Number(ride.fare) || 0,
+    payment: 'UPI',
+    vehicle: (ride.vehicleType as RideRequest['vehicle']) || 'Auto',
+    distanceFromDriverKm:
+      ride.distanceKmFromDriver != null ? Number(ride.distanceKmFromDriver) : null,
+    riderPhone: ride.riderPhone,
+    isLiveServerRide: true,
+  });
+
+  const setActiveFromServerRide = useCallback(
+    (ride: {
+      id: string;
+      riderName?: string;
+      pickup?: string;
+      drop?: string;
+      fare?: number;
+      distanceKm?: number;
+      vehicleType?: string;
+      distanceKmFromDriver?: number | null;
+      riderPhone?: string;
+    }) => {
+      setActiveRequest(rideToRequest(ride));
+      setTripStatus('to_pickup');
     },
     [],
   );
+
+  /** Queue a server ride as incoming popup (returns false if driver busy) */
+  const presentIncomingRide = useCallback(
+    (ride: {
+      id: string;
+      riderName?: string;
+      pickup?: string;
+      drop?: string;
+      fare?: number;
+      distanceKm?: number;
+      vehicleType?: string;
+      distanceKmFromDriver?: number | null;
+      riderPhone?: string;
+    }) => {
+      if (tripStatusRef.current !== 'idle') return false;
+      if (!isOnlineRef.current) return false;
+      // Same ride already showing
+      if (activeRequestRef.current?.id === ride.id) return false;
+      setActiveRequest(rideToRequest(ride));
+      setTripStatus('incoming');
+      return true;
+    },
+    [],
+  );
+
+  const completeTrip = useCallback((rating = 5, rideOverride?: Partial<RideRequest> | null) => {
+    const req = activeRequestRef.current;
+    const fare = Number(rideOverride?.fare ?? req?.fare ?? 0);
+    const pickup = String(rideOverride?.pickup ?? req?.pickup ?? 'Pickup');
+    const drop = String(rideOverride?.drop ?? req?.drop ?? 'Drop');
+    const distanceKm = Number(rideOverride?.distanceKm ?? req?.distanceKm ?? 0);
+    const payment = (rideOverride?.payment as string) || req?.payment || 'UPI';
+    const now = new Date();
+    const time = now.toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+    const entry: HistoryTrip = {
+      id: `h-${Date.now()}`,
+      date: 'Today',
+      time,
+      pickup,
+      drop,
+      fare,
+      distanceKm,
+      rating,
+      payment,
+    };
+    setHistory((prev) => [entry, ...prev]);
+    setLastCompleted(entry);
+    if (fare > 0) {
+      setTodayEarnings((v) => v + fare);
+      setTodayTrips((v) => v + 1);
+    }
+    setTripStatus('completed');
+  }, []);
 
   const resetToIdle = useCallback(() => {
     setActiveRequest(null);
@@ -223,10 +329,13 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
       todayEarnings,
       todayTrips,
       history,
+      lastCompleted,
       simulateIncoming,
       acceptRequest,
       rejectRequest,
       arrivedAtPickup,
+      setActiveFromServerRide,
+      presentIncomingRide,
       startTrip,
       completeTrip,
       resetToIdle,
@@ -240,10 +349,13 @@ export function DriverProvider({ children }: { children: React.ReactNode }) {
       todayEarnings,
       todayTrips,
       history,
+      lastCompleted,
       simulateIncoming,
       acceptRequest,
       rejectRequest,
       arrivedAtPickup,
+      setActiveFromServerRide,
+      presentIncomingRide,
       startTrip,
       completeTrip,
       resetToIdle,

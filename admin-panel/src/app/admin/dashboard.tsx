@@ -9,6 +9,9 @@ import {
   Alert,
   TextInput,
   Platform,
+  Image,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
 import {
@@ -27,14 +30,18 @@ import {
   Search,
   X,
   Info,
+  ChevronRight,
+  FileImage,
+  CreditCard,
 } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import { adminApi, AdminDriver, AdminRider } from '@/lib/api';
+import { adminApi, AdminDriver, AdminRider, AdminPayment, docImageUri } from '@/lib/api';
 import { ADMIN_TOKEN, setAdminToken } from './login';
 
 type Filter = 'pending' | 'approved' | 'rejected' | 'all';
-type Tab = 'kyc' | 'riders' | 'withdraw';
+type Tab = 'kyc' | 'riders' | 'payments' | 'withdraw';
 type RiderFilter = 'all' | 'active' | 'blocked';
+type PaymentFilter = 'all' | 'received' | 'pending';
 
 function alertMsg(title: string, msg: string) {
   if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -69,7 +76,11 @@ export default function AdminDashboardScreen() {
     name: string;
     loginId: string;
     password: string;
+    phone?: string;
+    smsSent?: boolean;
+    smsChannel?: string;
   } | null>(null);
+  const [driverSearch, setDriverSearch] = useState('');
   const [withdrawals, setWithdrawals] = useState<any[]>([]);
   const [weeklyOpen, setWeeklyOpen] = useState(false);
   const [weeklyNote, setWeeklyNote] = useState('');
@@ -79,6 +90,30 @@ export default function AdminDashboardScreen() {
   const [riderSearch, setRiderSearch] = useState('');
   const [blockId, setBlockId] = useState<string | null>(null);
   const [blockReason, setBlockReason] = useState('');
+  const [detailDriver, setDetailDriver] = useState<AdminDriver | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [payments, setPayments] = useState<AdminPayment[]>([]);
+  const [paymentFilter, setPaymentFilter] = useState<PaymentFilter>('all');
+  const [paymentStats, setPaymentStats] = useState<Record<string, number>>({});
+
+  const openDriverDetail = async (d: AdminDriver) => {
+    setDetailDriver(d);
+    setDetailLoading(true);
+    try {
+      const res = await adminApi.getDriver(ADMIN_TOKEN, d.id);
+      setDetailDriver(res.driver);
+    } catch {
+      /* list payload already has most fields */
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const closeDriverDetail = () => {
+    setDetailDriver(null);
+    setPreviewUri(null);
+  };
 
   const filteredRiders = useMemo(() => {
     const q = riderSearch.trim().toLowerCase();
@@ -97,6 +132,34 @@ export default function AdminDashboardScreen() {
       );
     });
   }, [riders, riderSearch]);
+
+  const filteredDrivers = useMemo(() => {
+    const q = driverSearch.trim().toLowerCase();
+    if (!q) return drivers;
+    const digits = q.replace(/\D/g, '');
+    return drivers.filter((d) => {
+      const name = (d.name || '').toLowerCase();
+      const phone = (d.phone || '').toLowerCase();
+      const phoneDigits = (d.phone || '').replace(/\D/g, '');
+      const loginId = (d.loginId || '').toLowerCase();
+      const id = (d.id || '').toLowerCase();
+      const vehicle = (d.vehicle?.registrationNumber || '').toLowerCase();
+      const vType = (d.vehicle?.type || '').toLowerCase();
+      const city = (d.city || '').toLowerCase();
+      const dl = (d.documents?.licenseNumber || '').toLowerCase();
+      return (
+        name.includes(q) ||
+        phone.includes(q) ||
+        loginId.includes(q) ||
+        id.includes(q) ||
+        vehicle.includes(q) ||
+        vType.includes(q) ||
+        city.includes(q) ||
+        dl.includes(q) ||
+        (digits.length >= 3 && phoneDigits.includes(digits))
+      );
+    });
+  }, [drivers, driverSearch]);
 
   const load = useCallback(async () => {
     if (!ADMIN_TOKEN) {
@@ -119,6 +182,21 @@ export default function AdminDashboardScreen() {
         const r = await adminApi.riders(ADMIN_TOKEN, riderFilter);
         setRiders(r.riders || []);
         if (r.stats) setStats((s) => ({ ...s, ...r.stats }));
+        try {
+          const pay = await adminApi.payments(ADMIN_TOKEN, paymentFilter);
+          setPayments(pay.payments || []);
+          if (pay.stats) {
+            setPaymentStats(pay.stats as any);
+            setStats((s) => ({
+              ...s,
+              platformBalance: pay.stats.platformBalance,
+              paymentsReceived: pay.stats.totalReceived,
+              paymentsPending: pay.stats.totalPending,
+            }));
+          }
+        } catch {
+          /* payments optional if old server */
+        }
       } catch {
         /* platform optional if old server */
       }
@@ -131,7 +209,7 @@ export default function AdminDashboardScreen() {
     } finally {
       setLoading(false);
     }
-  }, [filter, riderFilter, router]);
+  }, [filter, riderFilter, paymentFilter, router]);
 
   useFocusEffect(
     useCallback(() => {
@@ -143,14 +221,21 @@ export default function AdminDashboardScreen() {
     setBusyId(d.id);
     try {
       const res = await adminApi.approve(ADMIN_TOKEN, d.id);
+      const smsSent = !!res.credentialsNotify?.sent;
       setLastCredentials({
         name: res.driver.name,
         loginId: res.credentials.loginId,
         password: res.credentials.password,
+        phone: res.driver.phone,
+        smsSent,
+        smsChannel: res.credentialsNotify?.channel,
       });
+      const smsLine = smsSent
+        ? `\n\n📱 Also sent to +91 ${String(res.driver.phone || '').slice(-10)} (${res.credentialsNotify?.channel})`
+        : `\n\n⚠ SMS/WhatsApp not configured — credentials saved here for admin. Share manually if needed.`;
       alertMsg(
         'KYC Approved',
-        `Driver ID: ${res.credentials.loginId}\nPassword: ${res.credentials.password}\n\nShare with ${res.driver.name}`,
+        `Driver: ${res.driver.name}\nDriver ID: ${res.credentials.loginId}\nPassword: ${res.credentials.password}${smsLine}`,
       );
       await load();
     } catch (e: any) {
@@ -283,19 +368,42 @@ export default function AdminDashboardScreen() {
       color: '#4A6FA5',
     },
     {
+      title: 'Admin balance',
+      value:
+        stats.platformBalance != null
+          ? `₹${stats.platformBalance}`
+          : paymentStats.platformBalance != null
+            ? `₹${paymentStats.platformBalance}`
+            : '—',
+      icon: CreditCard,
+      color: Colors.success,
+    },
+    {
+      title: 'Payments received',
+      value:
+        stats.paymentsReceived != null
+          ? `₹${stats.paymentsReceived}`
+          : paymentStats.totalReceived != null
+            ? `₹${paymentStats.totalReceived}`
+            : '—',
+      icon: Wallet,
+      color: Colors.accent,
+    },
+    {
       title: 'Withdraw pending',
       value: String(
         stats.withdrawalsPending ??
           withdrawals.filter((w) => w.status === 'pending_admin').length,
       ),
       icon: Wallet,
-      color: Colors.accent,
+      color: Colors.accentDark || Colors.accent,
     },
   ];
 
   const TABS: { key: Tab; label: string }[] = [
     { key: 'kyc', label: 'Driver KYC' },
     { key: 'riders', label: 'Riders' },
+    { key: 'payments', label: 'Payments' },
     { key: 'withdraw', label: 'Payouts' },
   ];
 
@@ -582,6 +690,92 @@ export default function AdminDashboardScreen() {
           </View>
         ) : null}
 
+        {/* ——— PAYMENTS TAB (all fares → admin) ——— */}
+        {tab === 'payments' && !loading ? (
+          <View>
+            <View style={styles.card}>
+              <Text style={styles.name}>Admin platform balance</Text>
+              <Text style={styles.payBalance}>
+                ₹{paymentStats.platformBalance ?? stats.platformBalance ?? 0}
+              </Text>
+              <Text style={styles.meta}>
+                All completed-ride fares settle to Raydo admin — not directly to drivers.
+              </Text>
+              <View style={styles.payStatRow}>
+                <Text style={styles.payStat}>
+                  Received ₹{paymentStats.totalReceived ?? stats.paymentsReceived ?? 0}
+                </Text>
+                <Text style={styles.payStat}>
+                  Pending ₹{paymentStats.totalPending ?? stats.paymentsPending ?? 0}
+                </Text>
+              </View>
+            </View>
+
+            <Text style={styles.sectionTitle}>Ride payments</Text>
+            <View style={styles.filters}>
+              {(['all', 'received', 'pending'] as PaymentFilter[]).map((f) => (
+                <TouchableOpacity
+                  key={f}
+                  style={[styles.chip, paymentFilter === f && styles.chipOn]}
+                  onPress={() => setPaymentFilter(f)}
+                >
+                  <Text style={[styles.chipText, paymentFilter === f && styles.chipTextOn]}>
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {payments.length === 0 ? (
+              <View style={styles.empty}>
+                <CreditCard color={Colors.textLight} size={28} />
+                <Text style={styles.emptyText}>No {paymentFilter} payments yet</Text>
+              </View>
+            ) : null}
+
+            {payments.map((p) => (
+              <View key={p.id} style={styles.card}>
+                <View style={styles.cardTop}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.name}>₹{p.amount}</Text>
+                    <Text style={styles.meta}>
+                      {p.riderName || 'Rider'}
+                      {p.riderPhone ? ` · +91 ${p.riderPhone}` : ''}
+                    </Text>
+                    <Text style={styles.meta}>
+                      Driver: {p.driverName || '—'}
+                      {p.driverLoginId ? ` (${p.driverLoginId})` : ''}
+                    </Text>
+                    <Text style={styles.meta} numberOfLines={1}>
+                      {p.pickup || '—'} → {p.drop || '—'}
+                    </Text>
+                    <Text style={styles.meta}>
+                      {p.vehicleType || 'Ride'} · {p.method || 'upi'} · to {p.destination || 'admin'}
+                    </Text>
+                    <Text style={styles.meta}>
+                      {p.paidAt
+                        ? `Paid ${new Date(p.paidAt).toLocaleString()}`
+                        : p.createdAt
+                          ? `Created ${new Date(p.createdAt).toLocaleString()}`
+                          : ''}
+                    </Text>
+                  </View>
+                  <View
+                    style={[
+                      styles.statusPill,
+                      p.status === 'received' && styles.statusOk,
+                      p.status === 'pending' && styles.statusPend,
+                      p.status === 'failed' && styles.statusBad,
+                    ]}
+                  >
+                    <Text style={styles.statusText}>{p.status}</Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+
         {/* ——— WITHDRAW TAB ——— */}
         {tab === 'withdraw' && !loading ? (
           <View>
@@ -675,15 +869,44 @@ export default function AdminDashboardScreen() {
           <>
             {lastCredentials ? (
               <View style={styles.credBox}>
-                <Text style={styles.credTitle}>Last issued credentials</Text>
+                <Text style={styles.credTitle}>Last issued credentials (admin copy)</Text>
                 <Text style={styles.credLine}>{lastCredentials.name}</Text>
+                {lastCredentials.phone ? (
+                  <Text style={styles.credLine}>Mobile: +91 {lastCredentials.phone}</Text>
+                ) : null}
                 <Text style={styles.credLine}>ID: {lastCredentials.loginId}</Text>
                 <Text style={styles.credLine}>Password: {lastCredentials.password}</Text>
-                <Text style={styles.credHint}>Share only with the partner offline / SMS.</Text>
+                <Text style={styles.credHint}>
+                  {lastCredentials.smsSent
+                    ? `Sent to driver phone via ${lastCredentials.smsChannel || 'SMS/WhatsApp'}. Also kept here for admin.`
+                    : 'Saved for admin. Configure SMS/WhatsApp on server to auto-send to driver mobile.'}
+                </Text>
               </View>
             ) : null}
 
             <Text style={styles.sectionTitle}>Driver KYC queue</Text>
+            <View style={styles.searchWrap}>
+              <Search color={Colors.textLight} size={18} />
+              <TextInput
+                style={styles.searchInput}
+                value={driverSearch}
+                onChangeText={setDriverSearch}
+                placeholder="Search name, phone, Driver ID, RC, city…"
+                placeholderTextColor={Colors.textLight}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {driverSearch.length > 0 ? (
+                <TouchableOpacity onPress={() => setDriverSearch('')} hitSlop={10}>
+                  <X color={Colors.textLight} size={18} />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <Text style={styles.meta}>
+              {driverSearch.trim()
+                ? `${filteredDrivers.length} of ${drivers.length} drivers`
+                : `${drivers.length} drivers`}
+            </Text>
             <View style={styles.filters}>
               {(['pending', 'approved', 'rejected', 'all'] as Filter[]).map((f) => (
                 <TouchableOpacity
@@ -703,11 +926,23 @@ export default function AdminDashboardScreen() {
                 <Car color={Colors.textLight} size={28} />
                 <Text style={styles.emptyText}>No {filter} applications</Text>
               </View>
+            ) : filteredDrivers.length === 0 ? (
+              <View style={styles.empty}>
+                <Search color={Colors.textLight} size={28} />
+                <Text style={styles.emptyText}>No drivers match “{driverSearch.trim()}”</Text>
+                <TouchableOpacity onPress={() => setDriverSearch('')} style={styles.clearSearchBtn}>
+                  <Text style={styles.clearSearchText}>Clear search</Text>
+                </TouchableOpacity>
+              </View>
             ) : null}
 
-            {drivers.map((d) => (
+            {filteredDrivers.map((d) => (
               <View key={d.id} style={styles.card}>
-                <View style={styles.cardTop}>
+                <TouchableOpacity
+                  style={styles.cardTop}
+                  activeOpacity={0.85}
+                  onPress={() => openDriverDetail(d)}
+                >
                   <View style={styles.avatar}>
                     <Text style={styles.avatarText}>
                       {(d.name || 'D')
@@ -726,17 +961,23 @@ export default function AdminDashboardScreen() {
                       {d.vehicle?.model ? ` · ${d.vehicle.model}` : ''}
                     </Text>
                   </View>
-                  <View
-                    style={[
-                      styles.statusPill,
-                      d.kycStatus === 'approved' && styles.statusOk,
-                      d.kycStatus === 'rejected' && styles.statusBad,
-                      d.kycStatus === 'pending' && styles.statusPend,
-                    ]}
-                  >
-                    <Text style={styles.statusText}>{d.kycStatus}</Text>
+                  <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                    <View
+                      style={[
+                        styles.statusPill,
+                        d.kycStatus === 'approved' && styles.statusOk,
+                        d.kycStatus === 'rejected' && styles.statusBad,
+                        d.kycStatus === 'pending' && styles.statusPend,
+                      ]}
+                    >
+                      <Text style={styles.statusText}>{d.kycStatus}</Text>
+                    </View>
+                    <View style={styles.openRow}>
+                      <Text style={styles.openText}>Full details</Text>
+                      <ChevronRight color={Colors.primary} size={16} />
+                    </View>
                   </View>
-                </View>
+                </TouchableOpacity>
 
                 <View style={styles.docBlock}>
                   <Text style={styles.docLine}>DL: {d.documents?.licenseNumber || '—'}</Text>
@@ -749,6 +990,20 @@ export default function AdminDashboardScreen() {
                       ? `XXXX${String(d.documents.aadhaarNumber).slice(-4)}`
                       : '—'}
                   </Text>
+                  <Text style={styles.docLine}>
+                    PAN: {d.documents?.panNumber || '—'}
+                  </Text>
+                  <Text style={styles.docLine}>
+                    Photos:{' '}
+                    {[
+                      d.documents?.licensePhoto && 'DL',
+                      d.documents?.aadhaarPhoto && 'Aadhaar',
+                      d.documents?.panPhoto && 'PAN',
+                      d.documents?.rcPhoto && 'RC',
+                    ]
+                      .filter(Boolean)
+                      .join(' · ') || 'Not uploaded'}
+                  </Text>
                   {d.loginId ? <Text style={styles.docLine}>Login ID: {d.loginId}</Text> : null}
                   {d.tempPassword && d.kycStatus === 'approved' ? (
                     <Text style={styles.docLine}>Password: {d.tempPassword}</Text>
@@ -759,6 +1014,16 @@ export default function AdminDashboardScreen() {
                     </Text>
                   ) : null}
                 </View>
+
+                <TouchableOpacity
+                  style={[styles.btn, styles.btnGhost, { marginTop: 10 }]}
+                  onPress={() => openDriverDetail(d)}
+                >
+                  <FileImage color={Colors.primary} size={16} />
+                  <Text style={[styles.btnText, { color: Colors.primary }]}>
+                    Open full KYC details & photos
+                  </Text>
+                </TouchableOpacity>
 
                 {d.kycStatus === 'pending' ? (
                   <View style={styles.actions}>
@@ -827,6 +1092,214 @@ export default function AdminDashboardScreen() {
           <Text style={styles.refreshText}>Refresh data</Text>
         </TouchableOpacity>
       </ScrollView>
+
+      {/* Full driver KYC detail modal */}
+      <Modal
+        visible={!!detailDriver}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={closeDriverDetail}
+      >
+        <View style={styles.detailModal}>
+          <View style={styles.detailHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.detailEyebrow}>Driver KYC application</Text>
+              <Text style={styles.detailTitle}>{detailDriver?.name || 'Driver'}</Text>
+            </View>
+            <TouchableOpacity style={styles.detailClose} onPress={closeDriverDetail}>
+              <X color={Colors.primary} size={22} />
+            </TouchableOpacity>
+          </View>
+
+          {detailLoading ? (
+            <View style={styles.detailLoading}>
+              <ActivityIndicator color={Colors.primary} />
+              <Text style={styles.meta}>Loading full details…</Text>
+            </View>
+          ) : detailDriver ? (
+            <ScrollView contentContainerStyle={styles.detailScroll} showsVerticalScrollIndicator={false}>
+              <View
+                style={[
+                  styles.statusPill,
+                  detailDriver.kycStatus === 'approved' && styles.statusOk,
+                  detailDriver.kycStatus === 'rejected' && styles.statusBad,
+                  detailDriver.kycStatus === 'pending' && styles.statusPend,
+                  { alignSelf: 'flex-start', marginBottom: 12 },
+                ]}
+              >
+                <Text style={styles.statusText}>{detailDriver.kycStatus}</Text>
+              </View>
+
+              <Text style={styles.detailSection}>Personal details</Text>
+              <View style={styles.detailCard}>
+                <DetailRow label="Full name" value={detailDriver.name} />
+                <DetailRow label="Phone" value={`+91 ${detailDriver.phone}`} />
+                <DetailRow label="Email" value={detailDriver.email || '—'} />
+                <DetailRow label="City" value={detailDriver.city || '—'} />
+                <DetailRow
+                  label="Submitted"
+                  value={
+                    detailDriver.kycSubmittedAt
+                      ? new Date(detailDriver.kycSubmittedAt).toLocaleString()
+                      : '—'
+                  }
+                />
+                <DetailRow label="Driver record ID" value={detailDriver.id} mono />
+                {detailDriver.loginId ? (
+                  <DetailRow label="Login ID" value={detailDriver.loginId} mono />
+                ) : null}
+                {detailDriver.tempPassword && detailDriver.kycStatus === 'approved' ? (
+                  <DetailRow label="Temp password" value={detailDriver.tempPassword} mono />
+                ) : null}
+                {detailDriver.approvedAt ? (
+                  <DetailRow
+                    label="Approved at"
+                    value={`${new Date(detailDriver.approvedAt).toLocaleString()}${
+                      detailDriver.approvedBy ? ` · by ${detailDriver.approvedBy}` : ''
+                    }`}
+                  />
+                ) : null}
+                {detailDriver.kycRejectionReason ? (
+                  <DetailRow label="Rejection reason" value={detailDriver.kycRejectionReason} />
+                ) : null}
+              </View>
+
+              <Text style={styles.detailSection}>Vehicle details</Text>
+              <View style={styles.detailCard}>
+                <DetailRow label="Type" value={detailDriver.vehicle?.type || '—'} />
+                <DetailRow
+                  label="Registration"
+                  value={detailDriver.vehicle?.registrationNumber || '—'}
+                  mono
+                />
+                <DetailRow label="Model" value={detailDriver.vehicle?.model || '—'} />
+                <DetailRow label="Color" value={detailDriver.vehicle?.color || '—'} />
+                <DetailRow label="Year" value={detailDriver.vehicle?.year || '—'} />
+              </View>
+
+              <Text style={styles.detailSection}>Document numbers</Text>
+              <View style={styles.detailCard}>
+                <DetailRow
+                  label="Driving licence"
+                  value={detailDriver.documents?.licenseNumber || '—'}
+                  mono
+                />
+                <DetailRow
+                  label="RC number"
+                  value={
+                    detailDriver.documents?.rcNumber ||
+                    detailDriver.vehicle?.registrationNumber ||
+                    '—'
+                  }
+                  mono
+                />
+                <DetailRow
+                  label="Aadhaar"
+                  value={detailDriver.documents?.aadhaarNumber || '—'}
+                  mono
+                />
+                <DetailRow
+                  label="PAN"
+                  value={detailDriver.documents?.panNumber || '—'}
+                  mono
+                />
+                <DetailRow
+                  label="Insurance"
+                  value={detailDriver.documents?.insuranceNumber || '—'}
+                  mono
+                />
+              </View>
+
+              <Text style={styles.detailSection}>Uploaded document photos</Text>
+              <View style={styles.photoGrid}>
+                {(
+                  [
+                    ['Driving licence', detailDriver.documents?.licensePhoto],
+                    ['Aadhaar', detailDriver.documents?.aadhaarPhoto],
+                    ['PAN card', detailDriver.documents?.panPhoto],
+                    ['RC', detailDriver.documents?.rcPhoto],
+                    ['Profile', detailDriver.documents?.profilePhoto],
+                  ] as const
+                ).map(([label, path]) => {
+                  const uri = docImageUri(path);
+                  return (
+                    <View key={label} style={styles.photoCard}>
+                      <Text style={styles.photoLabel}>{label}</Text>
+                      {uri ? (
+                        <Pressable onPress={() => setPreviewUri(uri)}>
+                          <Image source={{ uri }} style={styles.docPhoto} resizeMode="cover" />
+                          <Text style={styles.tapHint}>Tap to enlarge</Text>
+                        </Pressable>
+                      ) : (
+                        <View style={styles.photoMissing}>
+                          <FileImage color={Colors.textLight} size={28} />
+                          <Text style={styles.photoMissingText}>Not uploaded</Text>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
+              </View>
+
+              {detailDriver.kycStatus === 'pending' ? (
+                <View style={styles.detailActions}>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnOk]}
+                    onPress={async () => {
+                      await onApprove(detailDriver);
+                      closeDriverDetail();
+                    }}
+                    disabled={busyId === detailDriver.id}
+                  >
+                    <Text style={styles.btnText}>
+                      {busyId === detailDriver.id ? '…' : 'Approve & issue ID'}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={[styles.btn, styles.btnBad]}
+                    onPress={() => {
+                      setRejectId(detailDriver.id);
+                      setRejectReason('');
+                      closeDriverDetail();
+                    }}
+                  >
+                    <Text style={styles.btnText}>Reject</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : null}
+            </ScrollView>
+          ) : null}
+        </View>
+
+        {/* Full-screen image preview */}
+        <Modal visible={!!previewUri} transparent animationType="fade" onRequestClose={() => setPreviewUri(null)}>
+          <Pressable style={styles.previewBackdrop} onPress={() => setPreviewUri(null)}>
+            {previewUri ? (
+              <Image source={{ uri: previewUri }} style={styles.previewFull} resizeMode="contain" />
+            ) : null}
+            <Text style={styles.previewCloseHint}>Tap anywhere to close</Text>
+          </Pressable>
+        </Modal>
+      </Modal>
+    </View>
+  );
+}
+
+function DetailRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <View style={styles.detailRow}>
+      <Text style={styles.detailLabel}>{label}</Text>
+      <Text style={[styles.detailValue, mono && styles.mono]} selectable>
+        {value}
+      </Text>
     </View>
   );
 }
@@ -1193,4 +1666,127 @@ const styles = StyleSheet.create({
     paddingVertical: 20,
   },
   refreshText: { color: Colors.primary, fontWeight: '700' },
+  openRow: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  openText: { fontSize: 11, fontWeight: '700', color: Colors.primary },
+  payBalance: {
+    fontSize: 32,
+    fontWeight: '800',
+    color: Colors.success,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  payStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 12,
+    gap: 12,
+  },
+  payStat: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    color: Colors.textSecondary,
+    backgroundColor: '#F7F4EF',
+    padding: 10,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  detailModal: {
+    flex: 1,
+    backgroundColor: '#F4F2ED',
+    paddingTop: Platform.OS === 'web' ? 16 : 48,
+  },
+  detailHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingBottom: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8E4DC',
+    backgroundColor: Colors.white,
+    gap: 12,
+  },
+  detailEyebrow: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: Colors.textLight,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  detailTitle: { fontSize: 20, fontWeight: '800', color: Colors.text, marginTop: 2 },
+  detailClose: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#F0EBE3',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  detailLoading: { padding: 40, alignItems: 'center', gap: 10 },
+  detailScroll: { padding: 20, paddingBottom: 40, gap: 4 },
+  detailSection: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: Colors.primary,
+    marginTop: 14,
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  detailCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#EFEBE3',
+    gap: 10,
+  },
+  detailRow: { gap: 2 },
+  detailLabel: { fontSize: 11, fontWeight: '700', color: Colors.textLight },
+  detailValue: { fontSize: 15, fontWeight: '700', color: Colors.text },
+  mono: { fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace', fontSize: 13 },
+  photoGrid: { gap: 12 },
+  photoCard: {
+    backgroundColor: Colors.white,
+    borderRadius: 16,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: '#EFEBE3',
+  },
+  photoLabel: { fontSize: 13, fontWeight: '800', color: Colors.text, marginBottom: 8 },
+  docPhoto: {
+    width: '100%',
+    height: 180,
+    borderRadius: 12,
+    backgroundColor: '#E8E4DC',
+  },
+  tapHint: {
+    marginTop: 6,
+    fontSize: 11,
+    fontWeight: '600',
+    color: Colors.textLight,
+    textAlign: 'center',
+  },
+  photoMissing: {
+    height: 120,
+    borderRadius: 12,
+    backgroundColor: '#F7F4EF',
+    borderWidth: 1,
+    borderColor: '#E8E4DC',
+    borderStyle: 'dashed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  photoMissingText: { fontSize: 12, fontWeight: '600', color: Colors.textLight },
+  detailActions: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  previewBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  previewFull: { width: '100%', height: '80%' },
+  previewCloseHint: { color: '#fff', marginTop: 12, fontWeight: '600' },
 });

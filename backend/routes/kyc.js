@@ -10,6 +10,7 @@ router.get('/status', kyc.getKycStatus);
 // Admin
 router.get('/admin/list', auth, requireAdmin, kyc.listPending);
 router.get('/admin/stats', auth, requireAdmin, kyc.stats);
+router.get('/admin/:id', auth, requireAdmin, kyc.getAdminDriver);
 router.post('/admin/:id/approve', auth, requireAdmin, kyc.approve);
 router.post('/admin/:id/reject', auth, requireAdmin, kyc.reject);
 

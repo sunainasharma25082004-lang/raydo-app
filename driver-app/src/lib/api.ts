@@ -71,6 +71,20 @@ export type LiveRide = {
   riderLocation?: { lat: number; lng: number; updatedAt?: string } | null;
   otp?: string;
   createdAt?: string;
+  chatEnabled?: boolean;
+  pickupEtaMinutes?: number | null;
+  pickupDistanceKm?: number | null;
+  distanceKmFromDriver?: number | null;
+};
+
+export type ChatMessage = {
+  id: string;
+  rideId?: string;
+  senderRole: 'rider' | 'driver' | string;
+  senderId?: string;
+  text: string;
+  message?: string;
+  createdAt?: string;
 };
 
 export type KycPayload = {
@@ -87,9 +101,15 @@ export type KycPayload = {
   };
   documents: {
     licenseNumber: string;
+    licensePhoto: string;
     rcNumber?: string;
-    aadhaarNumber?: string;
+    rcPhoto: string;
+    aadhaarNumber: string;
+    aadhaarPhoto: string;
+    panNumber: string;
+    panPhoto: string;
     insuranceNumber?: string;
+    profilePhoto?: string;
   };
 };
 
@@ -142,11 +162,44 @@ export const api = {
     request<{ ride: LiveRide | null }>('/api/platform/driver/active-ride', { token }),
 
   acceptRide: (token: string, rideId: string) =>
-    request<{ ride: LiveRide }>(`/api/platform/rides/${rideId}/accept`, {
+    request<{
+      ride: LiveRide;
+      chatEnabled?: boolean;
+      pickupEtaMinutes?: number | null;
+      whatsappNotify?: { sent?: boolean; channel?: string };
+    }>(`/api/platform/rides/${rideId}/accept`, {
       method: 'POST',
       token,
       body: '{}',
     }),
+
+  getChat: (rideId: string, token?: string) =>
+    request<{ rideId: string; chatEnabled: boolean; status: string; messages: ChatMessage[] }>(
+      `/api/platform/rides/${rideId}/chat`,
+      { token },
+    ),
+
+  sendChat: (
+    rideId: string,
+    body: {
+      text: string;
+      senderRole: 'rider' | 'driver';
+      senderId?: string;
+      token?: string;
+    },
+  ) =>
+    request<{ message: string; msg: ChatMessage; chatEnabled: boolean }>(
+      `/api/platform/rides/${rideId}/chat`,
+      {
+        method: 'POST',
+        token: body.token,
+        body: JSON.stringify({
+          text: body.text,
+          senderRole: body.senderRole,
+          senderId: body.senderId,
+        }),
+      },
+    ),
 
   updateRideStatus: (token: string, rideId: string, status: string, otp?: string) =>
     request<{ ride: LiveRide }>(`/api/platform/rides/${rideId}/status`, {

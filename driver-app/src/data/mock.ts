@@ -21,6 +21,10 @@ export type RideRequest = {
   fare: number;
   payment: 'Cash' | 'UPI' | 'Card';
   vehicle: VehicleKind;
+  /** Distance from driver GPS to pickup (nearest match) */
+  distanceFromDriverKm?: number | null;
+  riderPhone?: string;
+  isLiveServerRide?: boolean;
 };
 
 export type HistoryTrip = {

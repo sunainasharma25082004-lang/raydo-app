@@ -5,34 +5,64 @@ exports.createRide = (req, res) => {
   try {
     const ride = platform.createRide(req.body);
     const group = ride.vehicleGroup || driverStore.vehicleGroup(ride.vehicleType);
-    const matched = driverStore.listOnlineDriversByVehicle(ride.vehicleType);
+    const radiusKm = driverStore.DEFAULT_MATCH_RADIUS_KM || 12;
+    const limit = driverStore.MAX_NEARBY_DRIVERS || 10;
+
+    // Nearest online drivers only (same vehicle type, within radius, max 10)
+    const matched = driverStore.listNearestOnlineDrivers(
+      ride.vehicleType,
+      ride.pickupLat,
+      ride.pickupLng,
+      { limit, radiusKm },
+    );
+
+    const fullRide = platform.attachMatchedDrivers(ride.id, matched) || ride;
+    const payloadRide = {
+      ...fullRide,
+      matchedDriversSnapshot: matched.map((d) => ({
+        id: d.id,
+        name: d.name,
+        vehicle: d.vehicle,
+        location: d.location,
+        rating: d.rating,
+        distanceKm: d.distanceKm,
+      })),
+    };
+
     const io = req.app.get('io');
     if (io) {
-      // ONLY matching vehicle drivers (no global broadcast — avoids Auto seeing Scooty etc.)
+      // ONLY the nearest matched drivers — never broadcast to all of vehicle group
       matched.forEach((d) => {
         io.to(`driver:${d.id}`).emit('new_ride_request', {
-          ride,
+          ride: payloadRide,
           vehicleGroup: group,
+          distanceKm: d.distanceKm,
+          matchRank: matched.findIndex((x) => x.id === d.id) + 1,
+          matchedTotal: matched.length,
         });
       });
-      // Room for drivers who joined their vehicle group (Scooty/Bike → two_wheeler)
-      io.to(`vehicle:${group}`).emit('new_ride_request', {
-        ride,
-        vehicleGroup: group,
-      });
     }
+
     res.status(201).json({
-      message: 'Ride requested — only matching vehicle drivers notified',
-      ride,
+      message:
+        matched.length > 0
+          ? `Ride requested — sent to ${matched.length} nearest driver(s) within ${radiusKm} km`
+          : `No online ${ride.vehicleType} drivers within ${radiusKm} km of your pickup`,
+      ride: payloadRide,
       vehicleGroup: group,
-      matchRule:
-        group === 'two_wheeler'
-          ? 'Scooty/Bike drivers only'
-          : group === 'auto'
-            ? 'Auto drivers only'
-            : group === 'car'
-              ? 'Car drivers only'
-              : `${ride.vehicleType} only`,
+      matchRule: {
+        vehicle:
+          group === 'two_wheeler'
+            ? 'Scooty/Bike only'
+            : group === 'auto'
+              ? 'Auto only'
+              : group === 'car'
+                ? 'Car only'
+                : `${ride.vehicleType} only`,
+        maxDrivers: limit,
+        radiusKm,
+        sort: 'nearest_first',
+      },
       matchedDriversCount: matched.length,
       matchedDrivers: matched.map((d) => ({
         id: d.id,
@@ -40,6 +70,7 @@ exports.createRide = (req, res) => {
         vehicle: d.vehicle,
         location: d.location,
         rating: d.rating,
+        distanceKm: d.distanceKm,
       })),
     });
   } catch (e) {
@@ -53,15 +84,69 @@ exports.getRide = (req, res) => {
   res.json({ ride });
 };
 
-exports.acceptRide = (req, res) => {
+exports.acceptRide = async (req, res) => {
   try {
-    const ride = platform.acceptRide(req.params.id, req.user.id);
+    let ride = platform.acceptRide(req.params.id, req.user.id);
+
+    // Calculate ETA driver → pickup
+    const { estimatePickupEtaMinutes } = require('../services/eta');
+    const { notifyRiderDriverComing } = require('../services/notify');
+
+    const fromLat = ride.driverLocation?.lat ?? ride.driverSnapshot?.location?.lat;
+    const fromLng = ride.driverLocation?.lng ?? ride.driverSnapshot?.location?.lng;
+    const eta = await estimatePickupEtaMinutes({
+      fromLat,
+      fromLng,
+      toLat: ride.pickupLat,
+      toLng: ride.pickupLng,
+      vehicleType: ride.vehicleType,
+    });
+
+    const whatsappNotify = await notifyRiderDriverComing({
+      phone: ride.riderPhone,
+      driverName: ride.driverSnapshot?.name,
+      vehicleType: ride.vehicleType || ride.driverSnapshot?.vehicle?.type,
+      vehicleReg: ride.driverSnapshot?.vehicle?.registrationNumber,
+      etaMinutes: eta.etaMinutes,
+      distanceKm: eta.distanceKm,
+      otp: ride.otp,
+    });
+
+    ride =
+      platform.setRideAcceptMeta(ride.id, {
+        pickupEtaMinutes: eta.etaMinutes,
+        pickupDistanceKm: eta.distanceKm,
+        etaSource: eta.source,
+        whatsappNotify: {
+          ...whatsappNotify,
+          at: new Date().toISOString(),
+        },
+        chatEnabled: true,
+      }) || ride;
+
     const io = req.app.get('io');
     if (io) {
-      io.to(`rider:${ride.riderId}`).emit('ride_accepted', { ride });
+      const payload = {
+        ride,
+        chatEnabled: true,
+        pickupEtaMinutes: eta.etaMinutes,
+        pickupDistanceKm: eta.distanceKm,
+        whatsappNotify,
+      };
+      io.to(`rider:${ride.riderId}`).emit('ride_accepted', payload);
+      io.to(`ride:${ride.id}`).emit('ride_accepted', payload);
+      io.to(`chat:${ride.id}`).emit('chat_opened', { rideId: ride.id, chatEnabled: true });
       io.emit('ride_updated', { ride });
     }
-    res.json({ message: 'Ride accepted', ride });
+
+    res.json({
+      message: 'Ride accepted — rider notified, chat open until pickup',
+      ride,
+      chatEnabled: true,
+      pickupEtaMinutes: eta.etaMinutes,
+      pickupDistanceKm: eta.distanceKm,
+      whatsappNotify,
+    });
   } catch (e) {
     res.status(e.status || 500).json({ message: e.message });
   }
@@ -81,9 +166,92 @@ exports.updateStatus = (req, res) => {
         status: ride.status,
         ride,
       });
+      io.to(`ride:${ride.id}`).emit('ride_status_updated', {
+        status: ride.status,
+        ride,
+      });
+      // Close chat for both after pickup / trip start
+      if (ride.chatEnabled === false) {
+        io.to(`chat:${ride.id}`).emit('chat_closed', {
+          rideId: ride.id,
+          status: ride.status,
+          reason: 'Chat closed after pickup',
+        });
+        io.to(`rider:${ride.riderId}`).emit('chat_closed', {
+          rideId: ride.id,
+          status: ride.status,
+        });
+        if (ride.driverId) {
+          io.to(`driver:${ride.driverId}`).emit('chat_closed', {
+            rideId: ride.id,
+            status: ride.status,
+          });
+        }
+      }
       io.emit('ride_updated', { ride });
     }
-    res.json({ message: `Status → ${ride.status}`, ride });
+    res.json({
+      message: `Status → ${ride.status}`,
+      ride,
+      chatEnabled: !!ride.chatEnabled,
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ message: e.message });
+  }
+};
+
+/** GET chat history for a ride */
+exports.getChat = (req, res) => {
+  try {
+    const chatStore = require('../store/chatStore');
+    const ride = platform.getRide(req.params.id);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+    const messages = chatStore.getMessages(ride.id);
+    res.json({
+      rideId: ride.id,
+      chatEnabled: ride.chatEnabled !== false && chatStore.isChatOpen(ride.status),
+      status: ride.status,
+      messages,
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ message: e.message });
+  }
+};
+
+/** POST a chat message (rider or driver) */
+exports.postChat = (req, res) => {
+  try {
+    const chatStore = require('../store/chatStore');
+    const ride = platform.getRide(req.params.id);
+    if (!ride) return res.status(404).json({ message: 'Ride not found' });
+
+    const senderRole = req.body.senderRole || req.user?.role;
+    const senderId = req.body.senderId || req.user?.id || '';
+    if (senderRole !== 'rider' && senderRole !== 'driver') {
+      return res.status(400).json({ message: 'senderRole must be rider or driver' });
+    }
+    // Basic membership check
+    if (senderRole === 'driver' && ride.driverId && req.user?.id && ride.driverId !== req.user.id) {
+      return res.status(403).json({ message: 'Not your ride' });
+    }
+
+    const msg = chatStore.addMessage({
+      rideId: ride.id,
+      senderRole,
+      senderId,
+      text: req.body.text || req.body.message,
+      rideStatus: ride.chatEnabled === false ? 'In_Progress' : ride.status,
+    });
+
+    const io = req.app.get('io');
+    if (io) {
+      io.to(`chat:${ride.id}`).emit('receive_chat_message', msg);
+      io.to(`ride:${ride.id}`).emit('receive_chat_message', msg);
+      io.to(`rider:${ride.riderId}`).emit('receive_chat_message', msg);
+      if (ride.driverId) io.to(`driver:${ride.driverId}`).emit('receive_chat_message', msg);
+    }
+
+    res.status(201).json({ message: 'Sent', msg, chatEnabled: true });
   } catch (e) {
     res.status(e.status || 500).json({ message: e.message });
   }
@@ -276,4 +444,56 @@ exports.rateRide = (req, res) => {
   } catch (e) {
     res.status(e.status || 500).json({ message: e.message });
   }
+};
+
+/**
+ * Rider pays after trip complete — money goes to admin/platform balance.
+ */
+exports.payRide = (req, res) => {
+  try {
+    const result = platform.collectRiderPayment(req.params.id, {
+      method: req.body.method || 'upi',
+      transactionId: req.body.transactionId || '',
+      note: req.body.note || '',
+    });
+    // optional rating in same call
+    if (req.body.rating != null) {
+      try {
+        platform.rateRide(req.params.id, {
+          rating: req.body.rating,
+          comment: req.body.comment || '',
+          by: 'rider',
+        });
+      } catch {
+        /* ignore rating errors */
+      }
+    }
+    const io = req.app.get('io');
+    if (io) {
+      io.emit('payment_received', {
+        payment: result.payment,
+        platformBalance: result.platformBalance,
+      });
+      if (result.ride?.driverId) {
+        io.to(`driver:${result.ride.driverId}`).emit('payment_received', {
+          rideId: result.ride.id,
+          amount: result.payment.amount,
+        });
+      }
+    }
+    res.json({
+      message: result.alreadyPaid
+        ? 'Payment already received by admin'
+        : 'Payment successful — amount credited to Raydo admin',
+      ...result,
+    });
+  } catch (e) {
+    res.status(e.status || 500).json({ message: e.message });
+  }
+};
+
+/** Admin: all payments (destination = admin) */
+exports.adminPayments = (req, res) => {
+  const status = req.query.status || 'all';
+  res.json(platform.listPaymentsAdmin(status));
 };

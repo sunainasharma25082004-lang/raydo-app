@@ -93,7 +93,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   gridContainer: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     opacity: 0.15,
   },
   gridLineHorizontal: {
@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     backgroundColor: Colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
-    ...Shadow.medium,
+    ...Shadow.card,
     zIndex: 2,
   },
   pulseCircle: {
@@ -140,7 +140,7 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     borderRadius: Radius.lg,
     alignItems: 'center',
-    ...Shadow.medium,
+    ...Shadow.card,
     maxWidth: 250,
   },
   infoTitle: {

@@ -11,6 +11,7 @@ export default function RiderLayout() {
       <Stack.Screen name="search" />
       <Stack.Screen name="vehicle" />
       <Stack.Screen name="tracking" />
+      <Stack.Screen name="chat" />
       <Stack.Screen name="payment" />
     </Stack>
   );

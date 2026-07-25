@@ -49,7 +49,7 @@ export class MapErrorBoundary extends Component<Props, State> {
 
 const styles = StyleSheet.create({
   box: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
     backgroundColor: Colors.mapTint,
     alignItems: 'center',
     justifyContent: 'center',

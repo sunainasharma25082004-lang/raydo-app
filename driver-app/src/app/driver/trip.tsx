@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Linking, Pressable, StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import {
+  Alert,
+  Linking,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+  ActivityIndicator,
+  TouchableOpacity,
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { MessageCircle, Navigation, Phone, MapPin, Flag } from 'lucide-react-native';
 import { useFocusEffect } from 'expo-router';
@@ -14,14 +23,92 @@ import { api, LiveRide } from '@/lib/api';
 import { formatInr } from '@/data/mock';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 
+/** Open native dial pad with this number (India-friendly). */
+function openDialPad(raw?: string | null, label = 'Number') {
+  if (!raw || !String(raw).trim()) {
+    Alert.alert(`${label} unavailable`, 'Phone number not available yet.');
+    return;
+  }
+  const digits = String(raw).replace(/\D/g, '');
+  if (digits.length < 8) {
+    Alert.alert('Invalid number', String(raw));
+    return;
+  }
+  let tel = digits;
+  if (digits.length === 10) tel = `+91${digits}`;
+  else if (digits.startsWith('91') && digits.length === 12) tel = `+${digits}`;
+  else if (digits.length > 10) tel = `+${digits}`;
+
+  Linking.openURL(`tel:${tel}`).catch(() => {
+    Alert.alert('Could not open dialer', tel);
+  });
+}
+
 export default function TripScreen() {
   const router = useRouter();
   const { token } = useSession();
-  const { tripStatus, activeRequest, arrivedAtPickup, startTrip, completeTrip, resetToIdle } =
-    useDriver();
+  const {
+    tripStatus,
+    activeRequest,
+    arrivedAtPickup,
+    startTrip,
+    completeTrip,
+    resetToIdle,
+    setActiveFromServerRide,
+  } = useDriver();
   const [liveRide, setLiveRide] = useState<LiveRide | null>(null);
   const [loading, setLoading] = useState(true);
+  const [goingHome, setGoingHome] = useState(false);
   const { coords, address } = useCurrentLocation({ watch: true, highAccuracy: true });
+
+  const goHome = useCallback(() => {
+    if (goingHome) return;
+    setGoingHome(true);
+    try {
+      resetToIdle();
+    } catch {
+      /* ignore */
+    }
+    try {
+      router.dismissAll();
+    } catch {
+      /* ignore */
+    }
+    setTimeout(() => {
+      try {
+        router.replace('/driver/(tabs)/home');
+      } catch {
+        router.navigate('/driver/(tabs)/home' as any);
+      }
+      setGoingHome(false);
+    }, 50);
+  }, [goingHome, resetToIdle, router]);
+
+  const goToComplete = useCallback(
+    (ride?: LiveRide | null) => {
+      const fare = ride?.fare ?? activeRequest?.fare ?? 0;
+      completeTrip(5, {
+        fare,
+        pickup: ride?.pickup || activeRequest?.pickup,
+        drop: ride?.drop || activeRequest?.drop,
+        distanceKm: ride?.distanceKm || activeRequest?.distanceKm,
+        payment: 'UPI',
+      });
+      setLiveRide(null);
+      router.replace({
+        pathname: '/driver/complete',
+        params: {
+          fare: String(fare),
+          pickup: ride?.pickup || activeRequest?.pickup || '',
+          drop: ride?.drop || activeRequest?.drop || '',
+          riderName: ride?.riderName || activeRequest?.riderName || 'Rider',
+          rideId: ride?.id || activeRequest?.id || '',
+          distanceKm: String(ride?.distanceKm || activeRequest?.distanceKm || 0),
+        },
+      });
+    },
+    [activeRequest, completeTrip, router],
+  );
 
   const loadActive = useCallback(async () => {
     if (!token) {
@@ -30,13 +117,23 @@ export default function TripScreen() {
     }
     try {
       const res = await api.activeRide(token);
-      setLiveRide(res.ride);
+      const ride = res.ride;
+      // Completed / cancelled rides are not "active" — don't trap driver here
+      if (ride && ['Completed', 'Cancelled'].includes(ride.status)) {
+        setLiveRide(null);
+        return;
+      }
+      setLiveRide(ride);
+      // Keep local context in sync so complete screen has fare/route
+      if (ride && !activeRequest) {
+        setActiveFromServerRide(ride);
+      }
     } catch {
       /* ignore */
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, activeRequest, setActiveFromServerRide]);
 
   useFocusEffect(
     useCallback(() => {
@@ -59,8 +156,7 @@ export default function TripScreen() {
       if (status === 'Arrived') arrivedAtPickup();
       else if (status === 'In_Progress') startTrip();
       else if (status === 'Completed') {
-        completeTrip(5);
-        router.replace('/driver/complete');
+        goToComplete(null);
       }
       return;
     }
@@ -70,8 +166,7 @@ export default function TripScreen() {
       if (status === 'Arrived') arrivedAtPickup();
       if (status === 'In_Progress') startTrip();
       if (status === 'Completed') {
-        completeTrip(5);
-        router.replace('/driver/complete');
+        goToComplete(res.ride);
       }
     } catch (e: any) {
       Alert.alert('Update failed', e.message);
@@ -83,6 +178,11 @@ export default function TripScreen() {
   const riderName = liveRide?.riderName || activeRequest?.riderName || 'Rider';
   const fare = liveRide?.fare ?? activeRequest?.fare ?? 0;
   const phone = liveRide?.riderPhone || '';
+  const statusForChat =
+    liveRide?.status ||
+    (tripStatus === 'to_pickup' ? 'Accepted' : tripStatus === 'waiting' ? 'Arrived' : '');
+  const canChat =
+    liveRide?.chatEnabled !== false && ['Accepted', 'Arrived'].includes(statusForChat);
 
   if (loading && !activeRequest && !liveRide) {
     return (
@@ -100,7 +200,15 @@ export default function TripScreen() {
       <Screen>
         <View style={styles.empty}>
           <Text style={styles.emptyText}>No active trip</Text>
-          <Button title="Go home" onPress={() => router.replace('/driver/(tabs)/home')} />
+          <Text style={styles.emptyHint}>Trip finished or not loaded. Head back to home.</Text>
+          <TouchableOpacity
+            style={[styles.homeBtn, goingHome && { opacity: 0.7 }]}
+            onPress={goHome}
+            activeOpacity={0.85}
+            disabled={goingHome}
+          >
+            <Text style={styles.homeBtnText}>{goingHome ? 'Going home…' : 'Go to Home'}</Text>
+          </TouchableOpacity>
         </View>
       </Screen>
     );
@@ -189,25 +297,55 @@ export default function TripScreen() {
         <View style={styles.actionsRow}>
           <Pressable
             style={styles.iconBtn}
-            onPress={() => phone && Linking.openURL(`tel:${phone}`)}
+            onPress={() => openDialPad(phone, 'Rider number')}
+            accessibilityRole="button"
+            accessibilityLabel="Call rider"
           >
             <Phone size={18} color={Colors.primary} />
           </Pressable>
-          <Pressable style={styles.iconBtn}>
-            <MessageCircle size={18} color={Colors.primary} />
+          <Pressable
+            style={[
+              styles.iconBtn,
+              !canChat && styles.iconBtnDisabled,
+            ]}
+            onPress={() => {
+              if (!canChat) {
+                Alert.alert(
+                  'Chat closed',
+                  'Chat is only available until pickup. After the trip starts, messaging is disabled.',
+                );
+                return;
+              }
+              if (!liveRide?.id) return;
+              router.push({
+                pathname: '/driver/chat',
+                params: {
+                  rideId: liveRide.id,
+                  riderName,
+                },
+              });
+            }}
+          >
+            <MessageCircle size={18} color={canChat ? Colors.primary : Colors.textLight} />
           </Pressable>
         </View>
 
+        {canChat ? (
+          <Text style={styles.chatHint}>Chat open — closes when you start the trip</Text>
+        ) : liveRide?.status === 'In_Progress' || liveRide?.status === 'Completed' ? (
+          <Text style={styles.chatClosed}>Chat closed after pickup</Text>
+        ) : null}
+
+        {liveRide?.pickupEtaMinutes != null ? (
+          <Text style={styles.etaHint}>
+            Rider notified · ETA ~{liveRide.pickupEtaMinutes} min to pickup
+          </Text>
+        ) : null}
+
         <Button title={stage.cta} fullWidth onPress={stage.onCta} />
-        <Button
-          title="End / leave trip"
-          variant="outline"
-          fullWidth
-          onPress={() => {
-            resetToIdle();
-            router.replace('/driver/(tabs)/home');
-          }}
-        />
+        <TouchableOpacity style={styles.leaveBtn} onPress={goHome} activeOpacity={0.85}>
+          <Text style={styles.leaveBtnText}>End / leave trip</Text>
+        </TouchableOpacity>
       </View>
     </Screen>
   );
@@ -273,6 +411,35 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  iconBtnDisabled: { opacity: 0.5 },
+  chatHint: { fontSize: 12, fontWeight: '700', color: Colors.success },
+  chatClosed: { fontSize: 12, fontWeight: '700', color: Colors.error },
+  etaHint: { fontSize: 12, fontWeight: '700', color: Colors.textSecondary },
   empty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, padding: 24 },
-  emptyText: { color: Colors.textSecondary, fontWeight: '600' },
+  emptyText: { color: Colors.text, fontWeight: '800', fontSize: 18 },
+  emptyHint: {
+    color: Colors.textSecondary,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  homeBtn: {
+    marginTop: 8,
+    backgroundColor: Colors.primary,
+    paddingHorizontal: 28,
+    paddingVertical: 16,
+    borderRadius: Radius.md,
+    minWidth: 200,
+    alignItems: 'center',
+  },
+  homeBtnText: { color: Colors.white, fontWeight: '800', fontSize: 16 },
+  leaveBtn: {
+    borderWidth: 1.5,
+    borderColor: Colors.borderStrong,
+    borderRadius: Radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: Colors.surface,
+  },
+  leaveBtnText: { color: Colors.primary, fontWeight: '800', fontSize: 15 },
 });

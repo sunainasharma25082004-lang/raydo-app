@@ -64,6 +64,14 @@
           "isAndroidForegroundServiceEnabled": false
         }
       ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/icon.png",
+          "color": "#1B2A4A",
+          "defaultChannel": "rides"
+        }
+      ],
       "react-native-maps"
     ],
     "experiments": {
