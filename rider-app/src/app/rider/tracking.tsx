@@ -13,6 +13,7 @@ import MapView, { Marker, Polyline, Region, PROVIDER_GOOGLE } from 'react-native
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { Phone, ShieldAlert, Navigation, RefreshCw } from 'lucide-react-native';
+import MapViewDirections from 'react-native-maps-directions';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,
@@ -461,11 +462,14 @@ export default function TrackingScreen() {
                 </View>
               </Marker>
             ) : null}
-            {routeCoords.length > 1 ? (
-              <Polyline
-                coordinates={routeCoords}
-                strokeColor={Colors.primary}
+            {driverLoc && coords ? (
+              <MapViewDirections
+                origin={{ latitude: driverLoc.lat, longitude: driverLoc.lng }}
+                destination={{ latitude: coords.latitude, longitude: coords.longitude }}
+                apikey="AIzaSyCM7PNM7qrecVBF7VGERs6SLS73kLLZfX8"
                 strokeWidth={4}
+                strokeColor={Colors.primary}
+                onReady={(result) => setRouteEtaMin(Math.ceil(result.duration))}
               />
             ) : null}
           </MapView>

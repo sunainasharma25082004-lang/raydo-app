@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapViewDirections from 'react-native-maps-directions';
 import { MapPin, Navigation } from 'lucide-react-native';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 
@@ -79,6 +80,16 @@ export function MapCanvas({
                    <MapPin color={Colors.accent} size={28} fill={Colors.white} />
                 </View>
              </Marker>
+          )}
+
+          {showRoute && destCoords && coords && (
+             <MapViewDirections
+                origin={{ latitude: coords.latitude, longitude: coords.longitude }}
+                destination={{ latitude: destCoords.latitude, longitude: destCoords.longitude }}
+                apikey="AIzaSyCM7PNM7qrecVBF7VGERs6SLS73kLLZfX8"
+                strokeWidth={4}
+                strokeColor={Colors.accent}
+             />
           )}
         </MapView>
       ) : (
