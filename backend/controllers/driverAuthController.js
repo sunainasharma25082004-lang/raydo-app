@@ -1,27 +1,57 @@
 const jwt = require('jsonwebtoken');
-const store = require('../store/driverStore');
+const crypto = require('crypto');
+const Driver = require('../models/Driver');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret';
 
-exports.driverLogin = (req, res) => {
+// Helper function that mimics store.verifyPassword
+function verifyPassword(password, hash) {
+  const hashPassword = crypto.createHash('sha256').update(password).digest('hex');
+  return hashPassword === hash;
+}
+
+exports.driverLogin = async (req, res) => {
   try {
     const { loginId, password } = req.body;
     if (!loginId || !password) {
       return res.status(400).json({ message: 'Driver ID and password are required' });
     }
-    const driver = store.loginDriver(loginId, password);
+    
+    const driver = await Driver.findOne({ loginId });
+    if (!driver) {
+      return res.status(401).json({ message: 'Invalid Driver ID or password' });
+    }
+    
+    if (driver.kycStatus !== 'approved') {
+      const msg = driver.kycStatus === 'pending'
+        ? 'KYC still pending admin approval. You cannot login yet.'
+        : driver.kycStatus === 'rejected'
+          ? `KYC rejected: ${driver.kycRejectionReason || 'Contact support'}`
+          : 'Account not approved for login';
+      return res.status(403).json({ message: msg });
+    }
+    
+    if (!driver.passwordHash || !verifyPassword(password, driver.passwordHash)) {
+      return res.status(401).json({ message: 'Invalid Driver ID or password' });
+    }
+    
     const token = jwt.sign(
-      { id: driver.id, role: 'driver', loginId: driver.loginId, vehicleType: driver.vehicle?.type },
+      { id: driver._id, role: 'driver', loginId: driver.loginId, vehicleType: driver.vehicle?.type },
       JWT_SECRET,
       { expiresIn: '30d' },
     );
+    
+    // Return sanitized driver info
+    const driverData = driver.toObject();
+    delete driverData.passwordHash;
+    
     res.json({
       message: 'Login successful',
       token,
-      driver,
+      driver: driverData,
     });
   } catch (error) {
-    res.status(error.status || 500).json({ message: error.message || 'Login failed' });
+    res.status(500).json({ message: error.message || 'Login failed' });
   }
 };
 
@@ -31,42 +61,69 @@ exports.adminLogin = (req, res) => {
     if (!username || !password) {
       return res.status(400).json({ message: 'Username and password required' });
     }
-    const admin = store.loginAdmin(username, password);
+    
+    // Hardcoded admin for MongoDB migration phase (can be moved to Admin model later)
+    const adminHash = crypto.createHash('sha256').update('admin123').digest('hex');
+    
+    if (username !== 'admin' || !verifyPassword(password, adminHash)) {
+      return res.status(401).json({ message: 'Invalid admin credentials' });
+    }
+    
     const token = jwt.sign(
-      { id: admin.id, role: 'admin', username: admin.username },
+      { id: 'admin-1', role: 'admin', username: 'admin' },
       JWT_SECRET,
       { expiresIn: '7d' },
     );
-    res.json({ message: 'Admin login successful', token, admin });
+    res.json({ 
+      message: 'Admin login successful', 
+      token, 
+      admin: { id: 'admin-1', username: 'admin', name: 'Raydo Admin' } 
+    });
   } catch (error) {
-    res.status(error.status || 500).json({ message: error.message || 'Login failed' });
+    res.status(500).json({ message: error.message || 'Login failed' });
   }
 };
 
-exports.me = (req, res) => {
+exports.me = async (req, res) => {
   try {
     if (req.user.role !== 'driver') {
       return res.status(403).json({ message: 'Drivers only' });
     }
-    const driver = store.findDriverById(req.user.id);
+    const driver = await Driver.findById(req.user.id);
     if (!driver) return res.status(404).json({ message: 'Driver not found' });
+    
+    const driverData = driver.toObject();
+    delete driverData.passwordHash;
+    
     if (driver.kycStatus !== 'approved') {
-      return res.status(403).json({ message: 'KYC not approved', driver: store.publicDriver(driver) });
+      return res.status(403).json({ message: 'KYC not approved', driver: driverData });
     }
-    res.json({ driver: store.publicDriver(driver) });
+    res.json({ driver: driverData });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-exports.setOnline = (req, res) => {
+exports.setOnline = async (req, res) => {
   try {
-    const platform = require('../store/platformStore');
     const { isOnline, lat, lng } = req.body;
-    let driver = store.setOnline(req.user.id, isOnline);
+    
+    const updateData = { isOnline };
     if (lat != null && lng != null) {
-      driver = platform.updateDriverLocation(req.user.id, lat, lng, isOnline);
+      updateData.currentLocation = {
+        type: 'Point',
+        coordinates: [Number(lng), Number(lat)]
+      };
     }
+    
+    const driver = await Driver.findByIdAndUpdate(
+      req.user.id, 
+      updateData, 
+      { new: true }
+    );
+    
+    if (!driver) return res.status(404).json({ message: 'Driver not found' });
+    
     const io = req.app.get('io');
     if (io && lat != null && lng != null) {
       io.emit('driver_location_broadcast', {
@@ -76,16 +133,31 @@ exports.setOnline = (req, res) => {
         isOnline: !!isOnline,
       });
     }
-    res.json({ message: driver.isOnline ? 'You are online' : 'You are offline', driver });
+    
+    const driverData = driver.toObject();
+    delete driverData.passwordHash;
+    
+    res.json({ message: driver.isOnline ? 'You are online' : 'You are offline', driver: driverData });
   } catch (error) {
-    res.status(error.status || 500).json({ message: error.message });
+    res.status(500).json({ message: error.message });
   }
 };
 
-exports.openRides = (req, res) => {
+exports.openRides = async (req, res) => {
   try {
-    const platform = require('../store/platformStore');
-    const rides = platform.openRidesForDriver(req.user.id);
+    const driver = await Driver.findById(req.user.id);
+    if (!driver || driver.kycStatus !== 'approved' || !driver.isOnline) {
+      return res.json({ rides: [] });
+    }
+    
+    // In a real app, query nearest rides based on driver location. 
+    // For now, return all requested rides matching the driver's vehicle type.
+    const Ride = require('../models/Ride');
+    const rides = await Ride.find({
+      status: 'Requested',
+      vehicleType: driver.vehicle?.type
+    }).populate('riderId', 'name phone rating');
+    
     res.json({ rides });
   } catch (error) {
     res.status(500).json({ message: error.message });

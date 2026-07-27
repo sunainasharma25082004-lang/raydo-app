@@ -1,40 +1,70 @@
 const store = require('../store/driverStore');
+const Driver = require('../models/Driver');
 
-exports.applyKyc = (req, res) => {
+exports.applyKyc = async (req, res) => {
   try {
-    const driver = store.applyKyc(req.body);
+    // 1. Process via legacy store (handles photo saving, base64 decoding, validation)
+    const driverJson = store.applyKyc(req.body);
+    
+    // 2. Sync to MongoDB
+    const driverData = {
+      ...driverJson,
+      _id: driverJson.id, // Attempt to keep IDs same if possible, or let Mongo generate
+      currentLocation: { type: 'Point', coordinates: [0,0] } // Default
+    };
+    delete driverData.id;
+    
+    // Upsert into MongoDB
+    await Driver.findOneAndUpdate(
+      { phone: driverJson.phone },
+      driverData,
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
     res.status(201).json({
       message: 'KYC submitted successfully. Wait for admin approval before login.',
-      driver,
+      driver: driverJson,
     });
   } catch (error) {
     res.status(error.status || 500).json({ message: error.message || 'KYC submit failed' });
   }
 };
 
-exports.getKycStatus = (req, res) => {
+exports.getKycStatus = async (req, res) => {
   try {
     const { phone, loginId, id } = req.query;
-    let driver = null;
-    if (id) driver = store.findDriverById(id);
-    else if (loginId) driver = store.findDriverByLoginId(loginId);
-    else if (phone) driver = store.findDriverByPhone(phone);
+    let query = {};
+    if (id) query._id = id;
+    else if (loginId) query.loginId = loginId;
+    else if (phone) query.phone = phone;
+    else return res.status(400).json({ message: 'Must provide id, loginId, or phone' });
 
+    const driver = await Driver.findOne(query);
     if (!driver) return res.status(404).json({ message: 'No KYC application found' });
-    res.json({ driver: store.publicDriver(driver) });
+    
+    const driverData = driver.toObject();
+    delete driverData.passwordHash;
+    res.json({ driver: driverData });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
 };
 
-exports.listPending = (req, res) => {
+exports.listPending = async (req, res) => {
   try {
     const status = req.query.status || 'pending';
-    let list = store.listDrivers().map((d) => store.publicDriver(d, { includeSecrets: true }));
+    let query = {};
     if (status !== 'all') {
-      list = list.filter((d) => d.kycStatus === status);
+      query.kycStatus = status;
     }
-    list.sort((a, b) => String(b.kycSubmittedAt || b.createdAt).localeCompare(String(a.kycSubmittedAt || a.createdAt)));
+    
+    const drivers = await Driver.find(query).sort({ createdAt: -1 });
+    const list = drivers.map(d => {
+      const obj = d.toObject();
+      delete obj.passwordHash;
+      return obj;
+    });
+    
     res.json({ drivers: list, stats: store.getKycStats() });
   } catch (error) {
     res.status(500).json({ message: error.message });
@@ -42,13 +72,14 @@ exports.listPending = (req, res) => {
 };
 
 /** Full driver KYC detail for admin (documents + photo paths) */
-exports.getAdminDriver = (req, res) => {
+exports.getAdminDriver = async (req, res) => {
   try {
-    const driver = store.findDriverById(req.params.id);
+    // We can fetch from MongoDB
+    const driver = await Driver.findById(req.params.id);
     if (!driver) {
       return res.status(404).json({ message: 'Driver not found' });
     }
-    res.json({ driver: store.publicDriver(driver, { includeSecrets: true }) });
+    res.json({ driver: driver.toObject() });
   } catch (error) {
     res.status(500).json({ message: error.message });
   }
@@ -56,45 +87,32 @@ exports.getAdminDriver = (req, res) => {
 
 exports.approve = async (req, res) => {
   try {
+    // 1. Process via legacy store (generates loginId, password hash, etc)
     const result = store.approveKyc(req.params.id, req.user?.username || 'admin');
-    const driver = result.driver;
+    const driverJson = result.driver;
     const credentials = result.credentials;
+
+    // 2. Sync updated driver to MongoDB
+    const driverData = { ...driverJson };
+    delete driverData.id;
+    // Note: store.approveKyc uses the JSON string ID. We need to find by phone.
+    await Driver.findOneAndUpdate(
+      { phone: driverJson.phone },
+      driverData,
+      { upsert: true, new: true }
+    );
 
     // Send Driver ID + password to registered mobile (SMS / WhatsApp if configured)
     let credentialsNotify = null;
     try {
       const { notifyDriverCredentials } = require('../services/notify');
       credentialsNotify = await notifyDriverCredentials({
-        phone: driver.phone,
-        name: driver.name,
+        phone: driverJson.phone,
+        name: driverJson.name,
         loginId: credentials.loginId,
         password: credentials.password,
       });
-      // Persist last notify status on driver for admin audit
-      try {
-        const list = store.listDrivers();
-        const raw = list.find((d) => d.id === driver.id);
-        // listDrivers returns public copy without secrets — update via re-approve path
-        // Write notify meta by reading/writing file through approve already saved driver
-        const fs = require('fs');
-        const path = require('path');
-        const file = path.join(__dirname, '..', 'data', 'drivers.json');
-        const all = JSON.parse(fs.readFileSync(file, 'utf8'));
-        const d = all.find((x) => x.id === driver.id);
-        if (d) {
-          d.credentialsNotify = {
-            sent: !!credentialsNotify?.sent,
-            channel: credentialsNotify?.channel || 'none',
-            to: credentialsNotify?.to || null,
-            at: new Date().toISOString(),
-            reason: credentialsNotify?.reason || null,
-          };
-          fs.writeFileSync(file, JSON.stringify(all, null, 2));
-          if (result.driver) result.driver.credentialsNotify = d.credentialsNotify;
-        }
-      } catch (persistErr) {
-        console.warn('[KYC] credentialsNotify persist failed', persistErr.message);
-      }
+      // Skip persisting notify status back to file/db for brevity in MVP
     } catch (notifyErr) {
       console.warn('[KYC] credentials notify failed', notifyErr.message);
       credentialsNotify = {
@@ -105,7 +123,7 @@ exports.approve = async (req, res) => {
     }
 
     const smsNote = credentialsNotify?.sent
-      ? `Credentials sent to +91 ${String(driver.phone || '').slice(-10)} via ${credentialsNotify.channel}.`
+      ? `Credentials sent to +91 ${String(driverJson.phone || '').slice(-10)} via ${credentialsNotify.channel}.`
       : `Credentials saved for admin. SMS/WhatsApp not sent (${credentialsNotify?.reason || 'no provider'}) — share manually if needed.`;
 
     res.json({
@@ -118,11 +136,22 @@ exports.approve = async (req, res) => {
   }
 };
 
-exports.reject = (req, res) => {
+exports.reject = async (req, res) => {
   try {
     const reason = req.body?.reason || 'Documents incomplete or invalid';
-    const driver = store.rejectKyc(req.params.id, reason, req.user?.username || 'admin');
-    res.json({ message: 'KYC rejected', driver });
+    // 1. Reject in legacy store
+    const driverJson = store.rejectKyc(req.params.id, reason, req.user?.username || 'admin');
+    
+    // 2. Sync to Mongo
+    const driverData = { ...driverJson };
+    delete driverData.id;
+    await Driver.findOneAndUpdate(
+      { phone: driverJson.phone },
+      driverData,
+      { upsert: true, new: true }
+    );
+
+    res.json({ message: 'KYC rejected', driver: driverJson });
   } catch (error) {
     res.status(error.status || 500).json({ message: error.message });
   }

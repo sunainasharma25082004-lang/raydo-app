@@ -1,14 +1,29 @@
-const store = require('../store/driverStore');
-const platform = require('../store/platformStore');
+const Ride = require('../models/Ride');
+const Driver = require('../models/Driver');
 
-const MAX = store.MAX_NEARBY_DRIVERS || 10;
-const RADIUS = store.DEFAULT_MATCH_RADIUS_KM || 12;
+const MAX = 10;
+const RADIUS_KM = 12;
+
+// Helper to calculate haversine distance in km
+function haversineKm(lat1, lon1, lat2, lon2) {
+  const R = 6371; // km
+  const dLat = (lat2 - lat1) * (Math.PI / 180);
+  const dLon = (lon2 - lon1) * (Math.PI / 180);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(lat1 * (Math.PI / 180)) *
+      Math.cos(lat2 * (Math.PI / 180)) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
 
 /**
  * Rider requests a vehicle — only nearest same-type online drivers (max 10).
  * Body: vehicleType, pickupLat, pickupLng, pickup, drop, riderName, fare, distanceKm
  */
-exports.requestRide = (req, res) => {
+exports.requestRide = async (req, res) => {
   try {
     const {
       vehicleType,
@@ -19,9 +34,9 @@ exports.requestRide = (req, res) => {
       distanceKm,
       pickupLat,
       pickupLng,
-      riderId,
-      riderPhone,
     } = req.body;
+    
+    const riderId = req.user?.id || req.body.riderId;
 
     if (!vehicleType) {
       return res.status(400).json({ message: 'vehicleType is required (Bike, Scooty, Auto, Car)' });
@@ -35,33 +50,56 @@ exports.requestRide = (req, res) => {
       });
     }
 
-    // Prefer platform ride (full GPS + matched list)
-    const ride = platform.createRide({
+    // 1. Create the ride in MongoDB
+    const ride = await Ride.create({
       riderId,
-      riderName,
-      riderPhone,
-      pickup,
-      drop,
-      pickupLat: lat,
-      pickupLng: lng,
+      pickupLocation: { address: pickup || 'Pickup', lat, lng },
+      dropoffLocation: { address: drop || 'Drop', lat: null, lng: null }, // Optional drop lat/lng
       vehicleType,
-      fare,
-      distanceKm,
+      distance: distanceKm || 0,
+      fare: fare || 0,
+      otp: Math.floor(1000 + Math.random() * 9000).toString(),
+      status: 'Requested'
     });
 
-    const matched = store.listNearestOnlineDrivers(vehicleType, lat, lng, {
-      limit: MAX,
-      radiusKm: RADIUS,
+    // 2. Find nearest online drivers
+    const maxDistanceInMeters = RADIUS_KM * 1000;
+    const matchedDrivers = await Driver.find({
+      isOnline: true,
+      kycStatus: 'approved',
+      'vehicle.type': vehicleType,
+      currentLocation: {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: [lng, lat]
+          },
+          $maxDistance: maxDistanceInMeters
+        }
+      }
+    }).limit(MAX);
+    
+    // Process matched drivers
+    const matched = matchedDrivers.map(d => {
+      const dLng = d.currentLocation.coordinates[0];
+      const dLat = d.currentLocation.coordinates[1];
+      const dist = haversineKm(lat, lng, dLat, dLng);
+      return {
+        id: d._id,
+        name: d.name,
+        vehicle: d.vehicle,
+        rating: d.rating,
+        location: { lat: dLat, lng: dLng },
+        distanceKm: Number(dist.toFixed(2)),
+      };
     });
-    const fullRide = platform.attachMatchedDrivers(ride.id, matched) || ride;
-    const group = store.vehicleGroup(vehicleType);
 
     const io = req.app.get('io');
     if (io) {
       matched.forEach((d, idx) => {
         io.to(`driver:${d.id}`).emit('new_ride_request', {
-          ride: fullRide,
-          vehicleGroup: group,
+          ride,
+          vehicleGroup: vehicleType,
           distanceKm: d.distanceKm,
           matchRank: idx + 1,
           matchedTotal: matched.length,
@@ -73,21 +111,14 @@ exports.requestRide = (req, res) => {
       message:
         matched.length > 0
           ? `Ride requested — ${matched.length} nearest driver(s) notified`
-          : `No online ${vehicleType} drivers within ${RADIUS} km`,
-      ride: fullRide,
+          : `No online ${vehicleType} drivers within ${RADIUS_KM} km`,
+      ride,
       matchedDriversCount: matched.length,
-      matchedDrivers: matched.map((d) => ({
-        id: d.id,
-        name: d.name,
-        vehicle: d.vehicle,
-        rating: d.rating,
-        location: d.location,
-        distanceKm: d.distanceKm,
-      })),
+      matchedDrivers: matched,
       matchingRule: {
         vehicle: 'same type only',
         maxDrivers: MAX,
-        radiusKm: RADIUS,
+        radiusKm: RADIUS_KM,
         sort: 'nearest_first',
       },
     });
@@ -100,7 +131,7 @@ exports.requestRide = (req, res) => {
  * GET /api/match/drivers?vehicleType=Auto&lat=28.65&lng=77.23
  * Preview up to 10 nearest online drivers for a location.
  */
-exports.availableDrivers = (req, res) => {
+exports.availableDrivers = async (req, res) => {
   try {
     const vehicleType = req.query.vehicleType;
     if (!vehicleType) {
@@ -117,28 +148,46 @@ exports.availableDrivers = (req, res) => {
       });
     }
 
-    const drivers = store.listNearestOnlineDrivers(vehicleType, lat, lng, {
-      limit: MAX,
-      radiusKm: RADIUS,
-    });
-
-    res.json({
-      vehicleType,
-      group: store.vehicleGroup(vehicleType),
-      pickup: { lat, lng },
-      radiusKm: RADIUS,
-      maxDrivers: MAX,
-      count: drivers.length,
-      drivers: drivers.map((d) => ({
-        id: d.id,
+    const maxDistanceInMeters = RADIUS_KM * 1000;
+    const driversDb = await Driver.find({
+      isOnline: true,
+      kycStatus: 'approved',
+      'vehicle.type': vehicleType,
+      currentLocation: {
+        $near: {
+          $geometry: {
+            type: 'Point',
+            coordinates: [lng, lat]
+          },
+          $maxDistance: maxDistanceInMeters
+        }
+      }
+    }).limit(MAX);
+    
+    const drivers = driversDb.map(d => {
+      const dLng = d.currentLocation?.coordinates[0] || 0;
+      const dLat = d.currentLocation?.coordinates[1] || 0;
+      const dist = haversineKm(lat, lng, dLat, dLng);
+      return {
+        id: d._id,
         name: d.name,
         phone: d.phone,
         rating: d.rating,
         vehicle: d.vehicle,
-        location: d.location,
-        distanceKm: d.distanceKm,
+        location: { lat: dLat, lng: dLng },
+        distanceKm: Number(dist.toFixed(2)),
         isOnline: d.isOnline,
-      })),
+      };
+    });
+
+    res.json({
+      vehicleType,
+      group: vehicleType,
+      pickup: { lat, lng },
+      radiusKm: RADIUS_KM,
+      maxDrivers: MAX,
+      count: drivers.length,
+      drivers: drivers,
       matchingRule:
         'Only online drivers of the same vehicle type, sorted by distance, max 10 within radius',
     });
