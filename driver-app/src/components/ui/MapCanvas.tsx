@@ -121,7 +121,7 @@ const styles = StyleSheet.create({
     borderRadius: Radius.lg,
   },
   loadingWrap: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill as any,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -160,7 +160,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: Colors.border,
     maxWidth: '70%',
-    ...Shadow.sm,
+    ...Shadow.soft,
   },
   badgeTitle: {
     fontSize: 13,

@@ -230,4 +230,8 @@ export const riderApi = {
       method: 'POST',
       body: JSON.stringify(body || { method: 'upi' }),
     }),
+
+  /** Get mock nearby drivers for map UI */
+  getNearbyDrivers: (lat: number, lng: number) =>
+    request<NearbyDriver[]>(`/api/platform/nearby-drivers?lat=${lat}&lng=${lng}`),
 };

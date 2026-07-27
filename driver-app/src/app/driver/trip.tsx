@@ -248,9 +248,9 @@ export default function TripScreen() {
           showRoute
           coords={coords}
           destCoords={
-            (tripStatus === 'to_pickup' || tripStatus === 'waiting') && liveRide?.pickupLat
+            (tripStatus === 'to_pickup' || tripStatus === 'waiting') && liveRide?.pickupLat && liveRide?.pickupLng
               ? { latitude: liveRide.pickupLat, longitude: liveRide.pickupLng }
-              : tripStatus === 'in_progress' && liveRide?.dropLat
+              : ((tripStatus as any) === 'in_progress' || (tripStatus as any) === 'In_Progress') && liveRide?.dropLat && liveRide?.dropLng
               ? { latitude: liveRide.dropLat, longitude: liveRide.dropLng }
               : undefined
           }

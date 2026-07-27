@@ -30,7 +30,7 @@ import {
 } from 'lucide-react-native';
 import { useCurrentLocation } from '@/hooks/use-current-location';
 import { MapErrorBoundary } from '@/components/MapErrorBoundary';
-import { api } from '@/lib/api';
+import { riderApi as api } from '@/lib/api';
 
 const { height: SCREEN_H, width: SCREEN_W } = Dimensions.get('window');
 
@@ -111,8 +111,8 @@ export default function RiderHomeScreen() {
     if (!coords) return;
     const fetchDrivers = async () => {
       try {
-        const res = await api.get(`/platform/nearby-drivers?lat=${coords.latitude}&lng=${coords.longitude}`);
-        if (res.data) setNearbyDrivers(res.data);
+        const res = await api.getNearbyDrivers(coords.latitude, coords.longitude);
+        if (res) setNearbyDrivers(res);
       } catch (err) {}
     };
     fetchDrivers();
