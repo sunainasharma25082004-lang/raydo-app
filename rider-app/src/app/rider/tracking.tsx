@@ -748,7 +748,7 @@ export default function TrackingScreen() {
           <Text style={[styles.routeBoxText, { fontWeight: '700' }]} numberOfLines={1}>
             To: {ride?.drop || drop}
           </Text>
-          <Text style={styles.fare}>Fare ₹{ride?.fare ?? fareLabel.replace(/[^\d]/g, '') || '—'}</Text>
+          <Text style={styles.fare}>Fare ₹{(ride?.fare ?? fareLabel.replace(/[^\d]/g, '')) || '—'}</Text>
         </View>
       </View>
     </View>
