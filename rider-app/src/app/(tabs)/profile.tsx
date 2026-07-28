@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,8 +7,9 @@ import {
   TouchableOpacity,
   Alert,
   StatusBar,
+  Platform,
 } from 'react-native';
-import { Href, useRouter } from 'expo-router';
+import { Href, useRouter, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Radius } from '@/constants/Colors';
 import {
@@ -23,8 +24,15 @@ import {
   Shield,
   Star,
 } from 'lucide-react-native';
-import { clearRiderLogin } from '@/lib/session';
+import {
+  clearRiderLogin,
+  getProfileInitials,
+  getRiderProfile,
+  type RiderProfile,
+} from '@/lib/session';
 import { useAppTheme } from '@/context/ThemeContext';
+
+const TAB_BAR_H = Platform.OS === 'ios' ? 84 : 68;
 
 const RIDE_HISTORY = [
   { id: '1', destination: 'Phoenix Marketcity', date: 'Jul 15, 14:30', fare: '₹205', vehicle: 'Auto' },
@@ -37,24 +45,50 @@ export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const { colors, shadow, isDark } = useAppTheme();
   const styles = useMemo(() => createStyles(colors, shadow), [colors, shadow]);
+  const [profile, setProfile] = useState<RiderProfile>({
+    name: 'Rahul Sharma',
+    phone: '+91 98765 43210',
+    email: '',
+    city: 'Bengaluru',
+  });
+
+  // Reload whenever this tab / screen is focused (e.g. after Edit Profile save)
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        const p = await getRiderProfile();
+        if (active) setProfile(p);
+      })();
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
+  const initials = getProfileInitials(profile.name);
+  const bottomPad = TAB_BAR_H + Math.max(insets.bottom, 0) + 16;
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 8) }]}>
       <StatusBar barStyle={isDark ? 'light-content' : 'dark-content'} />
       <ScrollView
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
       >
         <Text style={styles.headerTitle}>Profile</Text>
         <Text style={styles.headerSub}>Manage account & preferences</Text>
 
         <View style={styles.profileCard}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>RS</Text>
+            <Text style={styles.avatarText}>{initials}</Text>
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.name}>Rahul Sharma</Text>
-            <Text style={styles.phone}>+91 98765 43210</Text>
+            <Text style={styles.name}>{profile.name}</Text>
+            <Text style={styles.phone}>{profile.phone}</Text>
+            {profile.city ? (
+              <Text style={styles.cityLine}>{profile.city}</Text>
+            ) : null}
             <View style={styles.ratingRow}>
               <Star size={12} color={colors.accent} fill={colors.accent} />
               <Text style={styles.ratingText}>4.9 · Premium rider</Text>
@@ -242,7 +276,6 @@ function createStyles(
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 40,
   },
   headerTitle: {
     fontSize: 28,
@@ -291,6 +324,12 @@ function createStyles(
   phone: {
     fontSize: 13,
     color: colors.textLight,
+    marginTop: 2,
+    fontWeight: '600',
+  },
+  cityLine: {
+    fontSize: 12,
+    color: colors.textSecondary,
     marginTop: 2,
     fontWeight: '600',
   },

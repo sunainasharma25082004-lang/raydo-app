@@ -7,10 +7,14 @@ import {
   TouchableOpacity,
   Alert,
   StatusBar,
+  Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 import { Clock, MapPin, Receipt } from 'lucide-react-native';
+
+/** Match tab bar height from (tabs)/_layout so list content clears it */
+const TAB_BAR_H = Platform.OS === 'ios' ? 84 : 68;
 
 const RIDES = [
   {
@@ -65,6 +69,7 @@ const RIDES = [
 
 export default function HistoryScreen() {
   const insets = useSafeAreaInsets();
+  const bottomPad = TAB_BAR_H + Math.max(insets.bottom, 0) + 16;
 
   return (
     <View style={[styles.container, { paddingTop: Math.max(insets.top, 12) + 8 }]}>
@@ -74,9 +79,13 @@ export default function HistoryScreen() {
         <Text style={styles.sub}>{RIDES.length} completed trips</Text>
       </View>
 
+      {/* flex:1 bounds height so content can scroll; without it ScrollView grows with content and never scrolls */}
       <ScrollView
+        style={styles.scroll}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.list}
+        contentContainerStyle={[styles.list, { paddingBottom: bottomPad }]}
+        keyboardShouldPersistTaps="handled"
+        nestedScrollEnabled
       >
         {RIDES.map((ride) => (
           <TouchableOpacity
@@ -161,7 +170,12 @@ const styles = StyleSheet.create({
     marginTop: 4,
     fontWeight: '600',
   },
-  list: { paddingBottom: 32 },
+  scroll: {
+    flex: 1,
+  },
+  list: {
+    flexGrow: 1,
+  },
   card: {
     backgroundColor: Colors.white,
     borderRadius: Radius.xl,

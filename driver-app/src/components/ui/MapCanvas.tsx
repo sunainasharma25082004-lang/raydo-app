@@ -89,6 +89,8 @@ export function MapCanvas({
                 apikey="AIzaSyCM7PNM7qrecVBF7VGERs6SLS73kLLZfX8"
                 strokeWidth={4}
                 strokeColor={Colors.accent}
+                onError={(err) => console.log('Maps error:', err)}
+                resetOnChange={false}
              />
           )}
         </MapView>

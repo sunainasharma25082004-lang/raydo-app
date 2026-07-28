@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import {
   View,
   Text,
@@ -9,32 +9,71 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Colors } from '@/constants/Colors';
 import { ScreenHeader } from '@/components/ui/ScreenHeader';
 import { User } from 'lucide-react-native';
+import {
+  getRiderProfile,
+  saveRiderProfile,
+  type RiderProfile,
+} from '@/lib/session';
 
 export default function EditProfileScreen() {
   const router = useRouter();
-  const [name, setName] = useState('Rahul Sharma');
-  const [phone, setPhone] = useState('+91 98765 43210');
-  const [email, setEmail] = useState('rahul.sharma@email.com');
-  const [city, setCity] = useState('Bengaluru');
+  const [name, setName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [city, setCity] = useState('');
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
-  const onSave = () => {
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      (async () => {
+        setLoading(true);
+        try {
+          const p = await getRiderProfile();
+          if (!active) return;
+          setName(p.name);
+          setPhone(p.phone);
+          setEmail(p.email);
+          setCity(p.city);
+        } finally {
+          if (active) setLoading(false);
+        }
+      })();
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
+  const onSave = async () => {
     if (!name.trim() || !phone.trim()) {
       Alert.alert('Missing details', 'Name and phone number are required.');
       return;
     }
     setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
+    try {
+      const next: RiderProfile = {
+        name: name.trim(),
+        phone: phone.trim(),
+        email: email.trim(),
+        city: city.trim(),
+      };
+      await saveRiderProfile(next);
       Alert.alert('Profile updated', 'Your details have been saved.', [
         { text: 'OK', onPress: () => router.back() },
       ]);
-    }, 600);
+    } catch {
+      Alert.alert('Could not save', 'Please try again.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -44,40 +83,46 @@ export default function EditProfileScreen() {
         style={{ flex: 1 }}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
-          <View style={styles.avatarWrap}>
-            <View style={styles.avatar}>
-              <User color={Colors.white} size={36} />
-            </View>
-            <Text style={styles.avatarHint}>Demo mode · photo upload soon</Text>
+        {loading ? (
+          <View style={styles.loadingWrap}>
+            <ActivityIndicator color={Colors.primary} />
           </View>
+        ) : (
+          <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+            <View style={styles.avatarWrap}>
+              <View style={styles.avatar}>
+                <User color={Colors.white} size={36} />
+              </View>
+              <Text style={styles.avatarHint}>Changes save on this device</Text>
+            </View>
 
-          <Field label="Full name" value={name} onChangeText={setName} placeholder="Your name" />
-          <Field
-            label="Phone"
-            value={phone}
-            onChangeText={setPhone}
-            placeholder="+91 ..."
-            keyboardType="phone-pad"
-          />
-          <Field
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@email.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
-          <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
+            <Field label="Full name" value={name} onChangeText={setName} placeholder="Your name" />
+            <Field
+              label="Phone"
+              value={phone}
+              onChangeText={setPhone}
+              placeholder="+91 ..."
+              keyboardType="phone-pad"
+            />
+            <Field
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@email.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+            />
+            <Field label="City" value={city} onChangeText={setCity} placeholder="City" />
 
-          <TouchableOpacity
-            style={[styles.saveBtn, saving && { opacity: 0.7 }]}
-            onPress={onSave}
-            disabled={saving}
-          >
-            <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save changes'}</Text>
-          </TouchableOpacity>
-        </ScrollView>
+            <TouchableOpacity
+              style={[styles.saveBtn, saving && { opacity: 0.7 }]}
+              onPress={onSave}
+              disabled={saving}
+            >
+              <Text style={styles.saveText}>{saving ? 'Saving…' : 'Save changes'}</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        )}
       </KeyboardAvoidingView>
     </View>
   );
@@ -116,6 +161,7 @@ function Field({
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.background },
+  loadingWrap: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { padding: 24, paddingBottom: 40 },
   avatarWrap: { alignItems: 'center', marginBottom: 28 },
   avatar: {
