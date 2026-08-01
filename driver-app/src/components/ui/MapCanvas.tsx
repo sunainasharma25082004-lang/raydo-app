@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import MapViewDirections from 'react-native-maps-directions';
+import MapView, { Marker, PROVIDER_GOOGLE } from '@/lib/maps';
+import MapViewDirections from '@/lib/maps-directions';
 import { MapPin, Navigation } from 'lucide-react-native';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
 

@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const store = require('../store/driverStore');
 const Driver = require('../models/Driver');
 
@@ -6,13 +7,13 @@ exports.applyKyc = async (req, res) => {
     // 1. Process via legacy store (handles photo saving, base64 decoding, validation)
     const driverJson = store.applyKyc(req.body);
     
-    // 2. Sync to MongoDB
+    // 2. Sync to MongoDB (don't set non-ObjectId string as _id)
     const driverData = {
       ...driverJson,
-      _id: driverJson.id, // Attempt to keep IDs same if possible, or let Mongo generate
       currentLocation: { type: 'Point', coordinates: [0,0] } // Default
     };
     delete driverData.id;
+    delete driverData._id;
     
     // Upsert into MongoDB
     await Driver.findOneAndUpdate(
@@ -34,7 +35,7 @@ exports.getKycStatus = async (req, res) => {
   try {
     const { phone, loginId, id } = req.query;
     let query = {};
-    if (id) query._id = id;
+    if (id && mongoose.Types.ObjectId.isValid(id)) query._id = id;
     else if (loginId) query.loginId = loginId;
     else if (phone) query.phone = phone;
     else return res.status(400).json({ message: 'Must provide id, loginId, or phone' });
@@ -74,8 +75,13 @@ exports.listPending = async (req, res) => {
 /** Full driver KYC detail for admin (documents + photo paths) */
 exports.getAdminDriver = async (req, res) => {
   try {
-    // We can fetch from MongoDB
-    const driver = await Driver.findById(req.params.id);
+    let driver = null;
+    if (mongoose.Types.ObjectId.isValid(req.params.id)) {
+      driver = await Driver.findById(req.params.id);
+    }
+    if (!driver) {
+      driver = await Driver.findOne({ phone: req.params.id }) || await Driver.findOne({ loginId: req.params.id });
+    }
     if (!driver) {
       return res.status(404).json({ message: 'Driver not found' });
     }
@@ -95,7 +101,8 @@ exports.approve = async (req, res) => {
     // 2. Sync updated driver to MongoDB
     const driverData = { ...driverJson };
     delete driverData.id;
-    // Note: store.approveKyc uses the JSON string ID. We need to find by phone.
+    delete driverData._id;
+
     await Driver.findOneAndUpdate(
       { phone: driverJson.phone },
       driverData,
@@ -112,7 +119,6 @@ exports.approve = async (req, res) => {
         loginId: credentials.loginId,
         password: credentials.password,
       });
-      // Skip persisting notify status back to file/db for brevity in MVP
     } catch (notifyErr) {
       console.warn('[KYC] credentials notify failed', notifyErr.message);
       credentialsNotify = {
@@ -145,6 +151,8 @@ exports.reject = async (req, res) => {
     // 2. Sync to Mongo
     const driverData = { ...driverJson };
     delete driverData.id;
+    delete driverData._id;
+
     await Driver.findOneAndUpdate(
       { phone: driverJson.phone },
       driverData,

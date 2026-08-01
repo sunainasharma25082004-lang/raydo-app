@@ -43,7 +43,7 @@
       "package": "com.sharma_sunaina.RaydoApp"
     },
     "web": {
-      "output": "static",
+      "output": "single",
       "favicon": "./assets/images/favicon.png"
     },
     "plugins": [
@@ -72,7 +72,12 @@
           "defaultChannel": "rides"
         }
       ],
-      "react-native-maps"
+      [
+        "react-native-maps",
+        {
+          "androidGoogleMapsApiKey": "AIzaSyCM7PNM7qrecVBF7VGERs6SLS73kLLZfX8"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

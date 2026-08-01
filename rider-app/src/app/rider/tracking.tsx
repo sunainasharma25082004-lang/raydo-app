@@ -10,7 +10,7 @@ import {
   Alert,
   StatusBar,
 } from 'react-native';
-import MapView, { Marker, Region, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE, type Region } from '@/lib/maps';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Colors, Radius, Shadow } from '@/constants/Colors';
@@ -25,7 +25,7 @@ import {
   Sparkles,
   Radio,
 } from 'lucide-react-native';
-import MapViewDirections from 'react-native-maps-directions';
+import MapViewDirections from '@/lib/maps-directions';
 import Animated, {
   useSharedValue,
   useAnimatedStyle,

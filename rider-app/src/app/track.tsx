@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Dimensions, Alert, TouchableOpacity, TextInput, FlatList, KeyboardAvoidingView, Platform, Linking } from 'react-native';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from '@/lib/maps';
 import * as Location from 'expo-location';
 import { io, Socket } from 'socket.io-client';
 import axios from 'axios';
