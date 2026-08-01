@@ -159,7 +159,19 @@ function saveDrivers(list) {
 }
 
 function findDriverById(id) {
-  return listDrivers().find((d) => d.id === id) || null;
+  if (!id) return null;
+  const clean = String(id).trim();
+  const phoneDigits = clean.replace(/\D/g, '').slice(-10);
+  const list = listDrivers();
+  return (
+    list.find(
+      (d) =>
+        d.id === clean ||
+        (d._id && String(d._id) === clean) ||
+        (d.loginId && String(d.loginId).toLowerCase() === clean.toLowerCase()) ||
+        (phoneDigits.length === 10 && String(d.phone || '').replace(/\D/g, '').slice(-10) === phoneDigits)
+    ) || null
+  );
 }
 
 function findDriverByLoginId(loginId) {
@@ -305,7 +317,7 @@ function applyKyc(payload) {
 
 function approveKyc(driverId, adminUsername) {
   const list = listDrivers();
-  const driver = list.find((d) => d.id === driverId);
+  const driver = findDriverById(driverId);
   if (!driver) {
     const err = new Error('Driver not found');
     err.status = 404;
@@ -357,7 +369,7 @@ function approveKyc(driverId, adminUsername) {
 
 function rejectKyc(driverId, reason, adminUsername) {
   const list = listDrivers();
-  const driver = list.find((d) => d.id === driverId);
+  const driver = findDriverById(driverId);
   if (!driver) {
     const err = new Error('Driver not found');
     err.status = 404;

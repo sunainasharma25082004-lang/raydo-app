@@ -93,8 +93,18 @@ exports.getAdminDriver = async (req, res) => {
 
 exports.approve = async (req, res) => {
   try {
+    const idParam = req.params.id;
+    let targetId = idParam;
+    if (mongoose.Types.ObjectId.isValid(idParam)) {
+      const d = await Driver.findById(idParam);
+      if (d) targetId = d.phone || d._id.toString();
+    } else {
+      const d = await Driver.findOne({ phone: idParam }) || await Driver.findOne({ loginId: idParam });
+      if (d) targetId = d.phone;
+    }
+
     // 1. Process via legacy store (generates loginId, password hash, etc)
-    const result = store.approveKyc(req.params.id, req.user?.username || 'admin');
+    const result = store.approveKyc(targetId, req.user?.username || 'admin');
     const driverJson = result.driver;
     const credentials = result.credentials;
 
@@ -144,9 +154,19 @@ exports.approve = async (req, res) => {
 
 exports.reject = async (req, res) => {
   try {
+    const idParam = req.params.id;
+    let targetId = idParam;
+    if (mongoose.Types.ObjectId.isValid(idParam)) {
+      const d = await Driver.findById(idParam);
+      if (d) targetId = d.phone || d._id.toString();
+    } else {
+      const d = await Driver.findOne({ phone: idParam }) || await Driver.findOne({ loginId: idParam });
+      if (d) targetId = d.phone;
+    }
+
     const reason = req.body?.reason || 'Documents incomplete or invalid';
     // 1. Reject in legacy store
-    const driverJson = store.rejectKyc(req.params.id, reason, req.user?.username || 'admin');
+    const driverJson = store.rejectKyc(targetId, reason, req.user?.username || 'admin');
     
     // 2. Sync to Mongo
     const driverData = { ...driverJson };
